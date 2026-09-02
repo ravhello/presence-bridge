@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 PAIRING_SCHEME = "presencepair"
 PAIRING_HOST = "pair"
 PROTOCOL_VERSION = 1
+MAX_INVITATION_LIFETIME = 600
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,96}$")
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 
@@ -60,7 +61,7 @@ class PairingLink:
             current = int(time.time()) if now is None else int(now)
             if self.expires_at <= current:
                 raise ProtocolError("Pairing invitation has expired")
-            if self.expires_at > current + 900:
+            if self.expires_at > current + MAX_INVITATION_LIFETIME:
                 raise ProtocolError(
                     "Pairing invitation expiry is too far in the future"
                 )

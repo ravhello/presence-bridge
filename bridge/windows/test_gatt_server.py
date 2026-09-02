@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from protocol import PairingLink, claim_proof, verify_claim
+import pytest
+from protocol import PairingLink, ProtocolError, claim_proof, verify_claim
 
 
 def test_claim_payload_round_trip() -> None:
@@ -26,3 +27,14 @@ def test_claim_payload_round_trip() -> None:
     ).encode()
     decoded = json.loads(encoded)
     assert verify_claim(link, decoded["proof"], now=1_800_000_000)
+
+
+def test_invitation_lifetime_is_limited_to_ten_minutes() -> None:
+    link = PairingLink(
+        session_id="abcdefghijklmnopQRSTUVWX",
+        observer_id="observer_1",
+        expires_at=1_800_000_601,
+        secret=bytes(range(32)),
+    )
+    with pytest.raises(ProtocolError, match="too far"):
+        PairingLink.from_uri(link.to_uri(), now=1_800_000_000)

@@ -2,6 +2,11 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.2 - 2026-09-02
+
+- Applied the ten-minute invitation lifetime limit to the packaged Windows
+  observer protocol as well as the Home Assistant integration.
+
 ## 0.1.1 - 2026-09-02
 
 - Enforced the documented ten-minute maximum pairing lifetime in the protocol
