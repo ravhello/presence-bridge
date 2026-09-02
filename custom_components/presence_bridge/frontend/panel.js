@@ -174,7 +174,7 @@ class PresenceBridgePanel extends HTMLElement {
       await this.load(true);
     } catch (error) {
       this._error = error?.message || String(error);
-      await this.load(true);
+      this.render();
     }
   }
 

@@ -788,7 +788,46 @@ class PresenceBridgeCoordinator:
     def diagnostics_payload(self) -> dict[str, Any]:
         """Return privacy-safe integration diagnostics."""
         payload = self.public_payload(include_invitation=False)
-        for identity in payload["identities"]:
+        observer_ids = {
+            observer["observer_id"]: f"OBSERVER_{index}"
+            for index, observer in enumerate(payload["observers"], start=1)
+        }
+        for observer in payload["observers"]:
+            observer["observer_id"] = observer_ids[observer["observer_id"]]
+            observer["name"] = "REDACTED"
+            observer["area_id"] = "REDACTED" if observer["area_id"] else None
+            observer["area_name"] = "REDACTED" if observer["area_name"] else None
+        for index, identity in enumerate(payload["identities"], start=1):
+            identity["identity_id"] = f"IDENTITY_{index}"
             identity["person_entity_id"] = "REDACTED"
             identity["label"] = "REDACTED"
+            identity["observer_id"] = observer_ids.get(
+                identity.get("observer_id"), identity.get("observer_id")
+            )
+            identity["observer_name"] = (
+                "REDACTED" if identity.get("observer_name") else None
+            )
+            identity["area_id"] = "REDACTED" if identity.get("area_id") else None
+            identity["area_name"] = "REDACTED" if identity.get("area_name") else None
+        payload["people"] = [
+            {"entity_id": "REDACTED", "name": "REDACTED"}
+            for _person in payload["people"]
+        ]
+        payload["areas"] = [
+            {"area_id": "REDACTED", "name": "REDACTED"} for _area in payload["areas"]
+        ]
+        pairing = payload["pairing"]
+        for key in (
+            "person_entity_id",
+            "person_name",
+            "observer_name",
+            "identity_id",
+            "message",
+        ):
+            if pairing.get(key):
+                pairing[key] = "REDACTED"
+        if pairing.get("observer_id"):
+            pairing["observer_id"] = observer_ids.get(
+                pairing["observer_id"], "REDACTED"
+            )
         return payload

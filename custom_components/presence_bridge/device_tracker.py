@@ -19,6 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
 
     @callback
     def add_entities() -> None:
+        known.intersection_update(coordinator.identity_states)
         new_ids = set(coordinator.identity_states) - known
         if new_ids:
             known.update(new_ids)

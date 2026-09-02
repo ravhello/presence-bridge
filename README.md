@@ -1,5 +1,8 @@
 # Presence Bridge
 
+[![Validate](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml/badge.svg)](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml)
+[![Release](https://img.shields.io/github/v/release/ravhello/presence-bridge?display_name=tag)](https://github.com/ravhello/presence-bridge/releases)
+
 Presence Bridge adds room-level iPhone presence to Home Assistant without a
 cloud account and without installing permanent Home Assistant credentials on
 the phone.
@@ -82,8 +85,9 @@ credentials, does not use analytics, and does not transmit location data. See
 
 ## Status
 
-The public protocol and integration are in preview. Presence Pair App Store
-availability is tracked in the project releases.
+The public protocol and integration are in preview. See the
+[changelog](CHANGELOG.md) for release scope. Presence Pair App Store availability
+is tracked in the project releases.
 
 ## License
 

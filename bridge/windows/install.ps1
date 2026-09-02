@@ -50,8 +50,28 @@ if ($python) {
     $pythonArguments = @()
 }
 
+$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($existingTask -and $existingTask.State -eq 'Running') {
+    Stop-ScheduledTask -TaskName $TaskName
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 250
+        $existingTask = Get-ScheduledTask -TaskName $TaskName
+    } while ($existingTask.State -eq 'Running' -and (Get-Date) -lt $deadline)
+    if ($existingTask.State -eq 'Running') {
+        throw "The existing '$TaskName' task did not stop in time."
+    }
+}
+
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
-$files = @('observer.py', 'gatt_server.py', 'protocol.py', 'verify_gatt.py', 'requirements.txt')
+$files = @(
+    'observer.py',
+    'gatt_server.py',
+    'protocol.py',
+    'verify_gatt.py',
+    'smoke_pairing.py',
+    'requirements.txt'
+)
 foreach ($file in $files) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot $file) -Destination (Join-Path $InstallRoot $file) -Force
 }
@@ -109,6 +129,10 @@ Start-ScheduledTask -TaskName $TaskName
 Start-Sleep -Seconds 4
 $state = (Get-ScheduledTask -TaskName $TaskName).State
 if ($state -notin @('Running', 'Ready')) { throw "Presence Bridge task state is $state." }
+& $venvPython (Join-Path $InstallRoot 'smoke_pairing.py') --config $configPath --timeout 20
+if ($LASTEXITCODE -ne 0) {
+    throw 'The running observer could not host the Presence Pair GATT service.'
+}
 
 Write-Host "Presence Bridge installed at $InstallRoot" -ForegroundColor Green
 Write-Host "Task: $TaskName ($state)" -ForegroundColor Green
