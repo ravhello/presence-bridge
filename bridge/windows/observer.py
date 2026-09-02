@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 from bleak import BleakScanner
@@ -155,7 +155,7 @@ def set_bluetooth_discoverable(enabled: bool) -> bool:
     from ctypes import wintypes
 
     class BluetoothFindRadioParams(ctypes.Structure):
-        _fields_ = [("dwSize", wintypes.DWORD)]
+        _fields_: ClassVar = [("dwSize", wintypes.DWORD)]
 
     bthprops = ctypes.WinDLL("bthprops.cpl")
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)

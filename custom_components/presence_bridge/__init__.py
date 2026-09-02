@@ -25,6 +25,7 @@ from .const import (
 from .coordinator import PresenceBridgeCoordinator
 
 DATA_REGISTERED = "_registered"
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 START_PAIRING_SCHEMA = vol.Schema(
     {
