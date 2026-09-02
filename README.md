@@ -77,6 +77,7 @@ credentials, does not use analytics, and does not transmit location data. See
 
 ## Documentation
 
+- [English tutorial](docs/tutorial.md)
 - [Windows observer](docs/windows-observer.md)
 - [Pairing protocol](docs/protocol.md)
 - [Privacy and security](docs/privacy.md)

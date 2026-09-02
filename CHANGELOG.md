@@ -2,6 +2,12 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.1 - 2026-09-02
+
+- Enforced the documented ten-minute maximum pairing lifetime in the protocol
+  parser, matching the existing Home Assistant service schema.
+- Added a complete English setup tutorial alongside the Italian guide.
+
 ## 0.1.0 - 2026-09-02
 
 - Added the local-push Home Assistant integration and administrator panel.

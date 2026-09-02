@@ -47,6 +47,18 @@ def test_expired_invitation_is_rejected() -> None:
         PairingLink.from_uri(LINK.to_uri(), now=NOW + 181)
 
 
+def test_invitation_lifetime_is_limited_to_ten_minutes() -> None:
+    """Reject links that bypass the maximum timeout exposed by HA."""
+    too_distant = PairingLink(
+        session_id=LINK.session_id,
+        observer_id=LINK.observer_id,
+        expires_at=NOW + 601,
+        secret=LINK.secret,
+    )
+    with pytest.raises(ProtocolError, match="too far"):
+        PairingLink.from_uri(too_distant.to_uri(), now=NOW)
+
+
 @pytest.mark.parametrize(
     "uri",
     [

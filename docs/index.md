@@ -25,6 +25,7 @@ Sharing entitlement.
 
 ## Start here
 
+- [English tutorial]({{ site.baseurl }}/tutorial/)
 - [Italian tutorial]({{ site.baseurl }}/tutorial-it/)
 - [Windows observer]({{ site.baseurl }}/windows-observer/)
 - [Troubleshooting]({{ site.baseurl }}/troubleshooting/)
