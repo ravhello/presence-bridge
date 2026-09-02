@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+coverage.xml
+htmlcov/
+bridge/windows/config.json
+bridge/windows/*.log*
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+.DS_Store

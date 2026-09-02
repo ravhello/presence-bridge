@@ -1,0 +1,31 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Presence Bridge is already configured."
+    },
+    "error": {
+      "mqtt_not_configured": "Configure the MQTT integration before adding Presence Bridge."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "name": "Name"
+        },
+        "description": "Presence Bridge uses your existing MQTT integration and keeps all identity processing local.",
+        "title": "Set up Presence Bridge"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Presence timing",
+        "description": "Tune expiry windows for intermittent iPhone advertisements and observer health.",
+        "data": {
+          "away_timeout": "Phone away timeout (seconds)",
+          "observer_timeout": "Observer offline timeout (seconds)"
+        }
+      }
+    }
+  }
+}

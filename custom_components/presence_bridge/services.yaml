@@ -1,0 +1,52 @@
+start_pairing:
+  name: Start iPhone pairing
+  description: Start a short-lived app-assisted Bluetooth pairing session.
+  fields:
+    person:
+      name: Person
+      required: true
+      selector:
+        entity:
+          domain: person
+    observer_id:
+      name: Observer
+      required: false
+      selector:
+        text:
+    timeout_seconds:
+      name: Timeout
+      required: false
+      default: 180
+      selector:
+        number:
+          min: 60
+          max: 600
+          unit_of_measurement: s
+          mode: box
+cancel_pairing:
+  name: Cancel pairing
+  description: Stop the active pairing session and Bluetooth advertisement.
+set_observer_area:
+  name: Set observer area
+  description: Assign a fixed Bluetooth observer to a Home Assistant area.
+  fields:
+    observer_id:
+      name: Observer
+      required: true
+      selector:
+        text:
+    area_id:
+      name: Area
+      required: false
+      selector:
+        area:
+remove_identity:
+  name: Remove identity
+  description: Remove a private Bluetooth identity from Home Assistant.
+  fields:
+    identity_id:
+      name: Identity
+      required: true
+      selector:
+        text:
+

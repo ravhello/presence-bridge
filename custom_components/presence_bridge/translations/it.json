@@ -1,0 +1,31 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Presence Bridge e gia configurato."
+    },
+    "error": {
+      "mqtt_not_configured": "Configura l'integrazione MQTT prima di aggiungere Presence Bridge."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "name": "Nome"
+        },
+        "description": "Presence Bridge usa l'integrazione MQTT esistente e mantiene locale l'elaborazione delle identita.",
+        "title": "Configura Presence Bridge"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tempi di presenza",
+        "description": "Regola le scadenze per le trasmissioni intermittenti degli iPhone e lo stato dei ricevitori.",
+        "data": {
+          "away_timeout": "Timeout telefono fuori casa (secondi)",
+          "observer_timeout": "Timeout ricevitore offline (secondi)"
+        }
+      }
+    }
+  }
+}

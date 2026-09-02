@@ -1,0 +1,22 @@
+[project]
+name = "presence-bridge-dev"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests", "bridge/windows"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["A", "ASYNC", "B", "C4", "E", "F", "I", "ICN", "ISC", "PIE", "PLC", "PLE", "PLW", "RUF", "SIM", "UP", "W"]
+ignore = ["E501", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+"bridge/windows/test_*.py" = ["S101"]
+"bridge/windows/gatt_server.py" = ["PLC0415"]
+"bridge/windows/observer.py" = ["PLC0415"]

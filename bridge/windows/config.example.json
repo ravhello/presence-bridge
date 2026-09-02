@@ -1,0 +1,16 @@
+{
+  "observer_id": "living_room_pc",
+  "name": "Living room Bluetooth",
+  "mqtt": {
+    "host": "homeassistant.local",
+    "port": 1883,
+    "username": "presence_bridge",
+    "password": "replace-me"
+  },
+  "publish_interval": 12,
+  "observation_ttl": 55,
+  "scanner_restart_interval": 1800,
+  "scanner_stale_timeout": 120,
+  "max_observations": 100,
+  "app_pairing_enabled": true
+}
