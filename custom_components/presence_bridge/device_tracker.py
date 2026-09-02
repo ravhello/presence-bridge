@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
-from homeassistant.components.device_tracker.const import SourceType
-from homeassistant.const import STATE_HOME, STATE_NOT_HOME
+from homeassistant.components.device_tracker import BaseScannerEntity, SourceType
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
@@ -34,10 +32,11 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
     )
 
 
-class PresenceBridgeTracker(PresenceBridgeIdentityEntity, TrackerEntity):
+class PresenceBridgeTracker(PresenceBridgeIdentityEntity, BaseScannerEntity):
     """Expose a paired phone as a local Bluetooth tracker."""
 
     _attr_name = "Bluetooth tracker"
+    _attr_source_type = SourceType.BLUETOOTH
 
     def __init__(
         self, coordinator: PresenceBridgeCoordinator, identity_id: str
@@ -55,15 +54,6 @@ class PresenceBridgeTracker(PresenceBridgeIdentityEntity, TrackerEntity):
         )
 
     @property
-    def source_type(self) -> SourceType:
-        return SourceType.BLUETOOTH
-
-    @property
-    def location_name(self) -> str:
+    def is_connected(self) -> bool:
         state = self.coordinator.identity_states.get(self.identity_id)
-        if state is None:
-            return STATE_NOT_HOME
-        if not state.is_home:
-            return STATE_NOT_HOME
-        payload = self.coordinator.identity_payload(self.identity_id)
-        return str(payload.get("area_name") or STATE_HOME)
+        return bool(state and state.is_home)
