@@ -45,7 +45,8 @@ ricevitore che sente meglio l'iPhone.
 Apri **Presence Bridge** dalla barra laterale di HA, scegli la persona e il
 ricevitore più vicino, quindi premi **Crea codice**. Apri Presence Pair
 sull'iPhone, completa l'acquisto personale una sola volta e inquadra il QR.
-Accetta la richiesta Bluetooth di iOS e attendi la conferma verde senza chiudere
+Il ricevitore Windows accetta automaticamente. Se iOS lo chiede, consenti a
+Presence Pair di usare il Bluetooth e attendi la conferma verde senza chiudere
 l'app.
 
 Il codice dura tre minuti. Non contiene password permanenti e, dopo

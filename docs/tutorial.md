@@ -44,8 +44,9 @@ observer that receives the strongest fresh iPhone signal.
 
 Open **Presence Bridge** in the Home Assistant sidebar, select a person and the
 nearest observer, then choose **Create code**. Open Presence Pair on the iPhone,
-complete the one-time personal purchase, and scan the QR code. Accept the iOS
-Bluetooth request and keep the app open until the green confirmation appears.
+complete the one-time personal purchase, and scan the QR code. The Windows
+receiver accepts automatically. If iOS asks, allow Presence Pair to
+use Bluetooth, then keep the app open until the green confirmation appears.
 
 The default code expires after three minutes. It contains no permanent Home
 Assistant password, and the app does not need to remain open after pairing.

@@ -640,14 +640,14 @@ class BlePresenceObserver:
             self._publish_pairing_status(
                 link.session_id,
                 "waiting_for_app",
-                "Scan the code with Presence Pair",
+                "Receiver ready; Windows accepts the iPhone connection automatically",
                 expires_at=link.expires_at,
             )
             await server.async_wait_for_claim(timeout_seconds)
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
-                "Encrypted claim accepted; capturing the private identity",
+                "Encrypted claim accepted automatically; capturing the private identity",
             )
             deadline = time.monotonic() + min(30, timeout_seconds)
             while time.monotonic() < deadline:
