@@ -34,7 +34,7 @@ from gatt_server import GattPairingServer
 from protocol import PairingLink, ProtocolError, b64url_decode
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.0"
+BRIDGE_VERSION = "0.1.2"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
