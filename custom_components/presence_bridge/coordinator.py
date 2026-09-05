@@ -534,6 +534,15 @@ class PresenceBridgeCoordinator:
         self._set_pairing_state(
             state,
             str(payload.get("message") or "Pairing update")[:240],
+            **{
+                key: str(payload[key])[:120]
+                for key in (
+                    "detail_code",
+                    "advertisement_status",
+                    "advertisement_error",
+                )
+                if payload.get(key) is not None
+            },
         )
         if state in {"cancelled", "timeout", "error"}:
             self._pairing_session = None

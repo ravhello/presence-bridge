@@ -30,15 +30,35 @@ async def verify(advertise_seconds: float) -> None:
     )
     server = GattPairingServer(**TEST_UUIDS)
     started = time.monotonic()
+    advertisement_status = "not_started"
+    advertisement_error = "none"
     try:
         await server.async_start(link)
-        await asyncio.sleep(max(1.0, min(10.0, advertise_seconds)))
+        advertisement_status = server.advertisement_status
+        advertisement_error = server.advertisement_error
+        await asyncio.sleep(max(1.0, min(60.0, advertise_seconds)))
+    except Exception as error:
+        advertisement_status = server.advertisement_status
+        advertisement_error = server.advertisement_error
+        print(
+            json.dumps(
+                {
+                    "compatible": False,
+                    "advertisement_status": advertisement_status,
+                    "advertisement_error": advertisement_error,
+                    "error": str(error),
+                }
+            )
+        )
+        raise
     finally:
         await server.async_stop()
     print(
         json.dumps(
             {
                 "compatible": True,
+                "advertisement_status": advertisement_status,
+                "advertisement_error": advertisement_error,
                 "advertised_seconds": round(time.monotonic() - started, 2),
                 "stopped_cleanly": True,
             }

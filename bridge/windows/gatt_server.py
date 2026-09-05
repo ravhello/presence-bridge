@@ -14,6 +14,40 @@ from protocol import PairingLink, public_session_payload, verify_claim
 LOGGER = logging.getLogger("presence_bridge.gatt")
 ATT_ERROR_UNLIKELY = 0x0E
 ATT_ERROR_AUTHORIZATION = 0x08
+ADVERTISEMENT_START_TIMEOUT_SECONDS = 5.0
+ADVERTISEMENT_START_ATTEMPTS = 3
+ADVERTISEMENT_POLL_SECONDS = 0.1
+ADVERTISEMENT_CREATED = 0
+ADVERTISEMENT_STOPPED = 1
+ADVERTISEMENT_STARTED = 2
+ADVERTISEMENT_ABORTED = 3
+ADVERTISEMENT_STARTED_WITHOUT_ALL_DATA = 4
+
+
+def advertisement_status_name(status: Any) -> str:
+    """Return a stable diagnostic name for a WinRT advertising status."""
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        return "unknown"
+    return {
+        ADVERTISEMENT_CREATED: "created",
+        ADVERTISEMENT_STOPPED: "stopped",
+        ADVERTISEMENT_STARTED: "started",
+        ADVERTISEMENT_ABORTED: "aborted",
+        ADVERTISEMENT_STARTED_WITHOUT_ALL_DATA: "started_without_all_data",
+    }.get(code, f"unknown_{code}")
+
+
+def winrt_error_name(error: Any) -> str:
+    """Return a readable name for a WinRT BluetoothError value."""
+    name = getattr(error, "name", None)
+    if isinstance(name, str) and name:
+        return name.lower()
+    try:
+        return f"code_{int(error)}"
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 def _buffer(value: bytes) -> Any:
@@ -45,6 +79,19 @@ class GattPairingServer:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._link: PairingLink | None = None
         self._claim_future: asyncio.Future[dict[str, Any]] | None = None
+        self._advertisement_status = "not_started"
+        self._advertisement_error = "none"
+        self._advertisement_status_token: Any = None
+
+    @property
+    def advertisement_status(self) -> str:
+        """Current normalized GATT advertisement status."""
+        return self._advertisement_status
+
+    @property
+    def advertisement_error(self) -> str:
+        """Last WinRT error reported by the advertising-status event."""
+        return self._advertisement_error
 
     async def async_start(self, link: PairingLink) -> None:
         """Create characteristics and begin connectable advertising."""
@@ -75,6 +122,11 @@ class GattPairingServer:
                     f"Unable to create GATT provider: {provider_result.error}"
                 )
             self._provider = provider_result.service_provider
+            self._advertisement_status_token = (
+                self._provider.add_advertisement_status_changed(
+                    self._on_advertisement_status_changed
+                )
+            )
 
             session_parameters = GattLocalCharacteristicParameters()
             session_parameters.characteristic_properties = (
@@ -139,20 +191,113 @@ class GattPairingServer:
             advertising = GattServiceProviderAdvertisingParameters()
             advertising.is_connectable = True
             advertising.is_discoverable = True
-            self._provider.start_advertising_with_parameters(advertising)
-            LOGGER.info("Temporary Presence Pair GATT service is advertising")
+            for attempt in range(1, ADVERTISEMENT_START_ATTEMPTS + 1):
+                try:
+                    self._provider.start_advertising_with_parameters(advertising)
+                    await self._async_wait_until_advertising()
+                    break
+                except Exception:
+                    if attempt >= ADVERTISEMENT_START_ATTEMPTS:
+                        raise
+                    LOGGER.warning(
+                        "GATT advertising attempt %s/%s failed with status=%s; retrying",
+                        attempt,
+                        ADVERTISEMENT_START_ATTEMPTS,
+                        self._advertisement_status,
+                    )
+                    try:
+                        self._provider.stop_advertising()
+                    except Exception:
+                        LOGGER.debug(
+                            "Unable to stop failed GATT advertising attempt",
+                            exc_info=True,
+                        )
+                    await asyncio.sleep(1)
+            if self._advertisement_status == "started_without_all_data":
+                LOGGER.warning(
+                    "Presence Pair GATT advertising started without all optional data"
+                )
+            else:
+                LOGGER.info("Temporary Presence Pair GATT service is advertising")
         except Exception:
             await self.async_stop()
             raise
+
+    async def _async_wait_until_advertising(self) -> None:
+        """Wait for Windows to confirm that the service is actually on air."""
+        if self._provider is None:
+            raise RuntimeError("GATT provider was not created")
+        deadline = asyncio.get_running_loop().time() + ADVERTISEMENT_START_TIMEOUT_SECONDS
+        while True:
+            status = self._provider.advertisement_status
+            self._advertisement_status = advertisement_status_name(status)
+            code = int(status)
+            if code in {
+                ADVERTISEMENT_STARTED,
+                ADVERTISEMENT_STARTED_WITHOUT_ALL_DATA,
+            }:
+                return
+            if asyncio.get_running_loop().time() >= deadline:
+                raise RuntimeError(
+                    "Windows Bluetooth advertising did not start within "
+                    f"{ADVERTISEMENT_START_TIMEOUT_SECONDS:.0f} seconds "
+                    f"(status: {self._advertisement_status}, "
+                    f"error: {self._advertisement_error})"
+                )
+            await asyncio.sleep(ADVERTISEMENT_POLL_SECONDS)
+
+    def _on_advertisement_status_changed(self, sender: Any, args: Any) -> None:
+        if self._loop is None or self._loop.is_closed():
+            return
+        status = getattr(args, "status", None)
+        if status is None:
+            status = getattr(sender, "advertisement_status", None)
+        error = getattr(args, "error", None)
+        self._loop.call_soon_threadsafe(
+            self._record_advertisement_status,
+            status,
+            error,
+        )
+
+    def _record_advertisement_status(self, status: Any, error: Any) -> None:
+        self._advertisement_status = advertisement_status_name(status)
+        if error is not None:
+            self._advertisement_error = winrt_error_name(error)
+        LOGGER.info(
+            "Presence Pair GATT advertisement status=%s error=%s",
+            self._advertisement_status,
+            self._advertisement_error,
+        )
 
     async def async_wait_for_claim(self, timeout_seconds: float) -> dict[str, Any]:
         """Wait until the app proves possession of the QR secret."""
         if self._claim_future is None:
             raise RuntimeError("GATT server has not started")
-        return await asyncio.wait_for(
-            asyncio.shield(self._claim_future),
-            timeout=timeout_seconds,
-        )
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        unavailable_since: float | None = None
+        while True:
+            if self._provider is None:
+                raise RuntimeError("GATT advertising stopped before the iPhone connected")
+            status = self._provider.advertisement_status
+            self._advertisement_status = advertisement_status_name(status)
+            if int(status) in {ADVERTISEMENT_STOPPED, ADVERTISEMENT_ABORTED}:
+                unavailable_since = unavailable_since or asyncio.get_running_loop().time()
+            else:
+                unavailable_since = None
+            if self._claim_future.done():
+                return self._claim_future.result()
+            if (
+                unavailable_since is not None
+                and asyncio.get_running_loop().time() - unavailable_since >= 10
+            ):
+                raise RuntimeError(
+                    "Windows Bluetooth advertising stopped before the iPhone connected "
+                    f"(status: {self._advertisement_status}, "
+                    f"error: {self._advertisement_error})"
+                )
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError
+            await asyncio.sleep(ADVERTISEMENT_POLL_SECONDS)
 
     def _on_write_requested(self, sender: Any, args: Any) -> None:
         if self._loop is None or self._loop.is_closed():
@@ -215,12 +360,24 @@ class GattPairingServer:
             except Exception:
                 LOGGER.debug("Write handler was already removed", exc_info=True)
         if self._provider is not None:
+            if self._advertisement_status_token is not None:
+                try:
+                    self._provider.remove_advertisement_status_changed(
+                        self._advertisement_status_token
+                    )
+                except Exception:
+                    LOGGER.debug(
+                        "Advertising status handler was already removed",
+                        exc_info=True,
+                    )
             try:
                 self._provider.stop_advertising()
             except Exception:
                 LOGGER.debug("GATT advertising was already stopped", exc_info=True)
+        self._advertisement_status = "stopped"
         self._claim_characteristic = None
         self._claim_token = None
+        self._advertisement_status_token = None
         self._provider = None
         self._link = None
         if self._claim_future is not None and not self._claim_future.done():

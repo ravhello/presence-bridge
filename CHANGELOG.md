@@ -2,6 +2,14 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.3 - 2026-09-05
+
+- Verify the real Windows GATT advertising state before reporting the receiver
+  as ready, retry transient advertising failures, and expose radio diagnostics
+  to Home Assistant.
+- Show actionable pairing guidance and one-click QR renewal in the HA panel.
+- Include GATT diagnostics in the observer log and adapter verification tool.
+
 ## 0.1.2 - 2026-09-02
 
 - Applied the ten-minute invitation lifetime limit to the packaged Windows

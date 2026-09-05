@@ -47,6 +47,13 @@ nearest observer, then choose **Create code**. Open Presence Pair on the iPhone,
 complete the one-time personal purchase, and scan the QR code. The Windows
 receiver accepts automatically. If iOS asks, allow Presence Pair to
 use Bluetooth, then keep the app open until the green confirmation appears.
+There is nothing to click or approve on the Windows computer.
+
+If pairing does not finish, use the specific title and diagnostic code shown by
+the app to distinguish permission, discovery, connection, QR verification, and
+encrypted-bond failures. The **Dell BLE** line in the HA panel confirms whether
+the receiver is actually advertising, and **New code** restarts the whole attempt
+without a manual step on the computer.
 
 The default code expires after three minutes. It contains no permanent Home
 Assistant password, and the app does not need to remain open after pairing.

@@ -19,6 +19,22 @@ permalink: /troubleshooting/
 - Keep the phone within a few metres of the selected observer.
 - Enable Bluetooth for Presence Pair in iOS Settings.
 - Ensure another pairing session is not already using that observer.
+- Check the `Dell BLE` line in the HA panel. It must say `started` or
+  `started_without_all_data`; `aborted` means the Windows radio did not start
+  the temporary service and the panel will offer a fresh code.
+
+There is no prompt to accept on the Windows receiver. After scanning, leave
+Presence Pair open. Only iOS may show an **Allow** or **Pair** prompt, and that
+prompt must be accepted on the iPhone.
+
+The app reports the stage that failed:
+
+- `PP-BLE-*`: Bluetooth is off, unavailable, or not authorized on the iPhone.
+- `PP-SCAN-01`: the iPhone never saw the receiver advertisement.
+- `PP-CONNECT-01`: it saw the receiver but could not connect.
+- `PP-VERIFY-01`: the receiver and QR session did not match.
+- `PP-BOND-01`: the encrypted Bluetooth bond was not completed.
+- `PP-SERVICE-01`: the Windows pairing service was incomplete.
 
 ## iOS asks to pair but HA reports no identity
 

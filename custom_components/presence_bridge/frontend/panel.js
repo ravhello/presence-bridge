@@ -83,6 +83,11 @@ class PresenceBridgePanel extends HTMLElement {
         .pair-info { display:grid; gap:12px; align-content:center; }
         .pair-info strong { font-size:20px; overflow-wrap:anywhere; }
         .muted { color:var(--secondary-text-color); }
+        .guidance { display:grid; gap:6px; padding:12px 14px; border-left:4px solid var(--primary-color); background:var(--secondary-background-color); }
+        .guidance.warning { border-left-color:var(--warning-color,#f0a000); }
+        .guidance.error { border-left-color:var(--error-color); }
+        .guidance b { font-size:14px; }
+        .diagnostic { font:12px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--secondary-text-color); }
         .actions { display:flex; flex-wrap:wrap; gap:8px; }
         table { width:100%; border-collapse:collapse; }
         th,td { padding:11px 8px; text-align:left; border-bottom:1px solid var(--divider-color); }
@@ -124,15 +129,77 @@ class PresenceBridgePanel extends HTMLElement {
 
   pairingView(pairing) {
     const terminal = ["complete", "error", "timeout"].includes(pairing.state);
+    const guidance = this.pairingGuidance(pairing);
+    const canRenew = pairing.person_entity_id && pairing.observer_id && pairing.state !== "complete";
     return `<div class="pairing">
       ${pairing.qr_data_uri && !terminal ? `<div class="qr"><img alt="Pairing QR" src="${pairing.qr_data_uri}"></div>` : `<ha-icon icon="${pairing.state === "complete" ? "mdi:check-circle" : "mdi:bluetooth-connect"}" style="--mdc-icon-size:96px;color:var(--primary-color)"></ha-icon>`}
-      <div class="pair-info"><strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span><div class="actions">${pairing.pairing_uri && !terminal ? `<a class="action primary" href="${this.escape(pairing.pairing_uri)}"><ha-icon icon="mdi:apple"></ha-icon>${this.text("Open Presence Pair", "Apri Presence Pair")}</a>` : ""}<button class="secondary" data-action="cancel"><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button></div></div>
+      <div class="pair-info"><strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span>${guidance ? `<div class="guidance ${guidance.tone}"><b>${this.escape(guidance.title)}</b><span>${this.escape(guidance.body)}</span>${pairing.advertisement_status ? `<span class="diagnostic">Dell BLE: ${this.escape(pairing.advertisement_status)}${pairing.advertisement_error && pairing.advertisement_error !== "success" && pairing.advertisement_error !== "none" ? ` · ${this.escape(pairing.advertisement_error)}` : ""}</span>` : ""}</div>` : ""}<div class="actions">${pairing.pairing_uri && !terminal ? `<a class="action primary" href="${this.escape(pairing.pairing_uri)}"><ha-icon icon="mdi:apple"></ha-icon>${this.text("Open Presence Pair", "Apri Presence Pair")}</a>` : ""}${canRenew ? `<button class="secondary" data-action="restart" data-person="${this.escape(pairing.person_entity_id)}" data-observer="${this.escape(pairing.observer_id)}"><ha-icon icon="mdi:qrcode-plus"></ha-icon>${this.text("New code", "Nuovo codice")}</button>` : ""}<button class="secondary" data-action="cancel"><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button></div></div>
     </div>`;
+  }
+
+  pairingGuidance(pairing) {
+    if (pairing.state === "complete") {
+      return {
+        tone: "",
+        title: this.text("Pairing complete", "Associazione completata"),
+        body: this.text("The identity is now available to Home Assistant.", "L'identità è ora disponibile in Home Assistant."),
+      };
+    }
+    if (pairing.detail_code === "receiver_advertising_failed") {
+      return {
+        tone: "error",
+        title: this.text("The Dell receiver reported an error", "Il ricevitore Dell ha segnalato un errore"),
+        body: this.text("The iPhone cannot complete pairing until the receiver is advertising. Create a new code after the receiver is online.", "L'iPhone non può completare l'associazione finché il ricevitore non trasmette. Crea un nuovo codice quando il ricevitore è online."),
+      };
+    }
+    if (pairing.state === "error") {
+      return {
+        tone: "error",
+        title: this.text("Pairing stopped with an error", "Associazione interrotta da un errore"),
+        body: pairing.message || this.text("Create a new code and try again.", "Crea un nuovo codice e riprova."),
+      };
+    }
+    if (pairing.state === "timeout" || pairing.detail_code === "iphone_not_seen") {
+      return {
+        tone: "warning",
+        title: this.text("The Dell did not receive the iPhone", "Il Dell non ha ricevuto l'iPhone"),
+        body: this.text("Nothing must be accepted on the Dell. Check the error code shown in Presence Pair, keep the app open and create a new code.", "Sul Dell non devi accettare nulla. Controlla il codice errore mostrato da Presence Pair, tieni aperta l'app e crea un nuovo codice."),
+      };
+    }
+    if (pairing.state === "bonding" || pairing.detail_code === "iphone_claim_accepted") {
+      return {
+        tone: "",
+        title: this.text("iPhone connected", "iPhone connesso"),
+        body: this.text("The encrypted request arrived. Home Assistant is capturing and verifying the private Bluetooth identity.", "La richiesta cifrata è arrivata. Home Assistant sta acquisendo e verificando l'identità Bluetooth privata."),
+      };
+    }
+    if (pairing.state === "waiting_for_app") {
+      const updated = Date.parse(pairing.updated_at || "");
+      const waited = Number.isFinite(updated) ? (Date.now() - updated) / 1000 : 0;
+      if (waited >= 15) {
+        return {
+          tone: "warning",
+          title: this.text("Still waiting for the iPhone", "Ancora in attesa dell'iPhone"),
+          body: this.text("The Dell is ready. On the iPhone keep Presence Pair open, allow Bluetooth in Settings, and tap Try Bluetooth again. There is no confirmation to make on the Dell.", "Il Dell è pronto. Sull'iPhone tieni aperta Presence Pair, consenti il Bluetooth nelle Impostazioni e premi Riprova Bluetooth. Sul Dell non c'è alcuna conferma da dare."),
+        };
+      }
+      return {
+        tone: "",
+        title: this.text("Scan and keep the app open", "Scansiona e tieni aperta l'app"),
+        body: this.text("Everything else is automatic. Only accept Allow or Pair if iOS shows a prompt; the Dell needs no action.", "Tutto il resto è automatico. Accetta Consenti o Abbina solo se iOS mostra una richiesta; sul Dell non devi fare nulla."),
+      };
+    }
+    return {
+      tone: "",
+      title: this.text("Preparing the Dell receiver", "Preparazione del ricevitore Dell"),
+      body: this.text("Wait until Home Assistant confirms that Bluetooth is advertising before scanning.", "Attendi che Home Assistant confermi la trasmissione Bluetooth prima di scansionare."),
+    };
   }
 
   bind() {
     this.shadowRoot.querySelector('[data-action="refresh"]')?.addEventListener("click", () => this.load());
     this.shadowRoot.querySelector('[data-action="start"]')?.addEventListener("click", () => this.startPairing());
+    this.shadowRoot.querySelector('[data-action="restart"]')?.addEventListener("click", (event) => this.restartPairing(event.currentTarget));
     this.shadowRoot.querySelector('[data-action="cancel"]')?.addEventListener("click", () => this.cancelPairing());
     this.shadowRoot.querySelectorAll('[data-action="area"]').forEach((element) => element.addEventListener("change", (event) => this.setObserverArea(event.currentTarget)));
     this.shadowRoot.querySelectorAll('[data-action="remove"]').forEach((element) => element.addEventListener("click", (event) => this.removeIdentity(event.currentTarget)));
@@ -145,6 +212,7 @@ class PresenceBridgePanel extends HTMLElement {
     this._loading = true;
     try {
       await this._hass.callWS({ type: "presence_bridge/start_pairing", person, observer_id: observer, timeout_seconds: 180 });
+      this._loading = false;
       await this.load(true);
     } catch (error) {
       this._error = error?.message || String(error);
@@ -160,6 +228,26 @@ class PresenceBridgePanel extends HTMLElement {
       await this.load(true);
     } catch (error) {
       this._error = error?.message || String(error);
+      this.render();
+    }
+  }
+
+  async restartPairing(element) {
+    if (this._loading) return;
+    this._loading = true;
+    try {
+      await this._hass.callWS({
+        type: "presence_bridge/start_pairing",
+        person: element.dataset.person,
+        observer_id: element.dataset.observer,
+        timeout_seconds: 180,
+      });
+      this._loading = false;
+      await this.load(true);
+    } catch (error) {
+      this._error = error?.message || String(error);
+    } finally {
+      this._loading = false;
       this.render();
     }
   }

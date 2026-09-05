@@ -34,7 +34,7 @@ from gatt_server import GattPairingServer
 from protocol import PairingLink, ProtocolError, b64url_decode
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.2"
+BRIDGE_VERSION = "0.1.3"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -640,14 +640,20 @@ class BlePresenceObserver:
             self._publish_pairing_status(
                 link.session_id,
                 "waiting_for_app",
-                "Receiver ready; Windows accepts the iPhone connection automatically",
+                "Bluetooth receiver is advertising; scan the QR code in Presence Pair",
                 expires_at=link.expires_at,
+                detail_code="waiting_for_iphone_ble",
+                advertisement_status=server.advertisement_status,
+                advertisement_error=server.advertisement_error,
             )
             await server.async_wait_for_claim(timeout_seconds)
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
                 "Encrypted claim accepted automatically; capturing the private identity",
+                detail_code="iphone_claim_accepted",
+                advertisement_status=server.advertisement_status,
+                advertisement_error=server.advertisement_error,
             )
             deadline = time.monotonic() + min(30, timeout_seconds)
             while time.monotonic() < deadline:
@@ -698,7 +704,10 @@ class BlePresenceObserver:
             self._publish_pairing_status(
                 link.session_id,
                 "timeout",
-                "Pairing invitation expired",
+                "The iPhone did not connect before the pairing code expired",
+                detail_code="iphone_not_seen",
+                advertisement_status=server.advertisement_status,
+                advertisement_error=server.advertisement_error,
             )
         except asyncio.CancelledError:
             self._publish_pairing_status(
@@ -713,6 +722,14 @@ class BlePresenceObserver:
                 link.session_id,
                 "error",
                 str(exc) or type(exc).__name__,
+                detail_code=(
+                    "receiver_advertising_failed"
+                    if server.advertisement_status
+                    in {"not_started", "created", "stopped", "aborted"}
+                    else "pairing_failed"
+                ),
+                advertisement_status=server.advertisement_status,
+                advertisement_error=server.advertisement_error,
             )
         finally:
             await server.async_stop()
@@ -970,6 +987,12 @@ def configure_logging(path: str, verbose: bool) -> None:
     )
     file_handler.setFormatter(formatter)
     LOGGER.addHandler(file_handler)
+    gatt_logger = logging.getLogger("presence_bridge.gatt")
+    gatt_logger.setLevel(level)
+    gatt_logger.handlers.clear()
+    gatt_logger.addHandler(stream)
+    gatt_logger.addHandler(file_handler)
+    gatt_logger.propagate = False
 
 
 async def async_main(config: ObserverConfig) -> None:

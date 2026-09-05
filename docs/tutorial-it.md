@@ -47,7 +47,13 @@ ricevitore più vicino, quindi premi **Crea codice**. Apri Presence Pair
 sull'iPhone, completa l'acquisto personale una sola volta e inquadra il QR.
 Il ricevitore Windows accetta automaticamente. Se iOS lo chiede, consenti a
 Presence Pair di usare il Bluetooth e attendi la conferma verde senza chiudere
-l'app.
+l'app. Sul Dell non devi premere o confermare nulla.
+
+Se l'associazione non termina, leggi il titolo e il codice diagnostico mostrati
+dall'app: distinguono permesso Bluetooth, ricevitore non trovato, connessione,
+verifica del QR e legame cifrato. Nella plancia HA la riga **Dell BLE** conferma
+se il ricevitore sta davvero trasmettendo e **Nuovo codice** riavvia l'intero
+tentativo senza passaggi manuali sul PC.
 
 Il codice dura tre minuti. Non contiene password permanenti e, dopo
 l'associazione, l'app non deve restare aperta.
