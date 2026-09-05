@@ -32,7 +32,9 @@ def test_winrt_error_name_uses_numeric_fallback() -> None:
     assert winrt_error_name(None) == "unknown"
 
 
-def test_advertising_wait_ignores_transient_aborted_status(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_advertising_wait_ignores_transient_aborted_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Provider:
         statuses = iter((3, 2))
         current = 3

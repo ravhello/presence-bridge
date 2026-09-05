@@ -227,7 +227,9 @@ class GattPairingServer:
         """Wait for Windows to confirm that the service is actually on air."""
         if self._provider is None:
             raise RuntimeError("GATT provider was not created")
-        deadline = asyncio.get_running_loop().time() + ADVERTISEMENT_START_TIMEOUT_SECONDS
+        deadline = (
+            asyncio.get_running_loop().time() + ADVERTISEMENT_START_TIMEOUT_SECONDS
+        )
         while True:
             status = self._provider.advertisement_status
             self._advertisement_status = advertisement_status_name(status)
@@ -277,11 +279,15 @@ class GattPairingServer:
         unavailable_since: float | None = None
         while True:
             if self._provider is None:
-                raise RuntimeError("GATT advertising stopped before the iPhone connected")
+                raise RuntimeError(
+                    "GATT advertising stopped before the iPhone connected"
+                )
             status = self._provider.advertisement_status
             self._advertisement_status = advertisement_status_name(status)
             if int(status) in {ADVERTISEMENT_STOPPED, ADVERTISEMENT_ABORTED}:
-                unavailable_since = unavailable_since or asyncio.get_running_loop().time()
+                unavailable_since = (
+                    unavailable_since or asyncio.get_running_loop().time()
+                )
             else:
                 unavailable_since = None
             if self._claim_future.done():
