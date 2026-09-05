@@ -33,8 +33,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Enter a stable ID such as `living_room_pc`, a readable name, and credentials
 for a dedicated MQTT user. The installer asks for the password interactively,
-so it does not enter shell history. At the end, both the GATT check and the
-scheduled task must report success.
+so it does not enter shell history. At the end, the scheduled task must report
+`Running`.
 
 When the observer appears in the Presence Bridge panel, assign it to the Home
 Assistant area where it is physically installed. Room estimates use the fixed
@@ -44,15 +44,16 @@ observer that receives the strongest fresh iPhone signal.
 
 Open **Presence Bridge** in the Home Assistant sidebar, select a person and the
 nearest observer, then choose **Create code**. Open Presence Pair on the iPhone,
-complete the one-time personal purchase, and scan the QR code. The Windows
-receiver accepts automatically. If iOS asks, allow Presence Pair to
-use Bluetooth, then keep the app open until the green confirmation appears.
+complete the one-time personal purchase, and scan the QR code. The iPhone then
+becomes temporarily visible to the selected receiver, which connects and
+accepts automatically. If iOS asks, allow Presence Pair to use Bluetooth or tap
+Pair, then keep the app open until the green confirmation appears.
 There is nothing to click or approve on the Windows computer.
 
 If pairing does not finish, use the specific title and diagnostic code shown by
 the app to distinguish permission, discovery, connection, QR verification, and
-encrypted-bond failures. The **Dell BLE** line in the HA panel confirms whether
-the receiver is actually advertising, and **New code** restarts the whole attempt
+encrypted-bond failures. The HA panel reports whether the Dell is searching,
+has found the iPhone, or has opened the connection. **New code** restarts the whole attempt
 without a manual step on the computer.
 
 The default code expires after three minutes. It contains no permanent Home

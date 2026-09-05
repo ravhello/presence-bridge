@@ -15,6 +15,7 @@ sys.path.insert(
 from protocol import (
     PairingLink,
     ProtocolError,
+    acceptance_proof,
     claim_proof,
     verify_claim,
 )
@@ -36,9 +37,15 @@ def test_pairing_uri_round_trip() -> None:
 
 def test_claim_vector() -> None:
     """Keep this vector in sync with the Swift unit test."""
-    assert claim_proof(LINK) == "ADpo7jfRbxUAzTdGQw-jA3O_tRC_ynKLQ2hHUR94uho"
+    assert claim_proof(LINK) == "-q6gU_keDbd_kcgOXTfnolM0m3ke96HzM_b-z1uuXPk"
     assert verify_claim(LINK, claim_proof(LINK), now=NOW)
     assert not verify_claim(LINK, "A" * 43, now=NOW)
+
+
+def test_acceptance_vector() -> None:
+    """The iPhone can authenticate the receiver acknowledgement."""
+    assert acceptance_proof(LINK) == "u1KQY_RD_yBH9VIx0CrrOe2nZ0zrkbuoa3iOBhH6QE4"
+    assert acceptance_proof(LINK) != claim_proof(LINK)
 
 
 def test_expired_invitation_is_rejected() -> None:
@@ -64,7 +71,7 @@ def test_invitation_lifetime_is_limited_to_ten_minutes() -> None:
     [
         "https://example.test/pair",
         "presencepair://pair?v=1",
-        "presencepair://pair?v=2&sid=abcdefghijklmnop&oid=bridge_1&exp=1800000180&secret=AA",
+        "presencepair://pair?v=3&sid=abcdefghijklmnop&oid=bridge_1&exp=1800000180&secret=AA",
     ],
 )
 def test_malformed_invitation_is_rejected(uri: str) -> None:

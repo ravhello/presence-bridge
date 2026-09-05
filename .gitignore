@@ -14,3 +14,7 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+# Local Windows Bluetooth diagnostics and compiler output.
+bridge/windows/native_probe/
+bridge/windows/sparse/
+*.obj

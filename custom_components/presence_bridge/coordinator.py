@@ -62,10 +62,12 @@ _ACTIVE_PAIRING_STATES = {
     "preparing",
     "advertising",
     "waiting_for_app",
+    "connecting",
     "bonding",
     "identity_captured",
     "verifying",
 }
+_FORCED_RENEWAL_COALESCE_SECONDS = 30.0
 
 
 def _utcnow() -> datetime:
@@ -112,6 +114,7 @@ class PresenceBridgeCoordinator:
             "message": "No pairing in progress",
         }
         self._pairing_session: dict[str, Any] | None = None
+        self._pairing_lock = asyncio.Lock()
         self._unsubscribers: list[Callable[[], None]] = []
         self._periodic_task: asyncio.Task[None] | None = None
         self._cipher_cache: dict[str, Any] = {}
@@ -374,8 +377,27 @@ class PresenceBridgeCoordinator:
         person_entity_id: str,
         observer_id: str | None = None,
         timeout_seconds: int = DEFAULT_PAIRING_TIMEOUT,
+        *,
+        force_new: bool = False,
     ) -> dict[str, Any]:
         """Start an app-assisted, one-shot BLE bond session."""
+        async with self._pairing_lock:
+            return await self._async_start_pairing_locked(
+                person_entity_id,
+                observer_id,
+                timeout_seconds,
+                force_new=force_new,
+            )
+
+    async def _async_start_pairing_locked(
+        self,
+        person_entity_id: str,
+        observer_id: str | None,
+        timeout_seconds: int,
+        *,
+        force_new: bool,
+    ) -> dict[str, Any]:
+        """Create a pairing session while renewal requests are serialized."""
         person_entity_id = str(person_entity_id or "").strip()
         person_state = self.hass.states.get(person_entity_id)
         if not person_entity_id.startswith("person.") or person_state is None:
@@ -387,6 +409,22 @@ class PresenceBridgeCoordinator:
             MIN_PAIRING_TIMEOUT,
             min(MAX_PAIRING_TIMEOUT, int(timeout_seconds)),
         )
+        current = self._pairing_session
+        if current is not None:
+            same_target = (
+                current.get("person_entity_id") == person_entity_id
+                and current.get("observer_id") == selected.observer_id
+            )
+            still_valid = int(current.get("expires_at") or 0) > int(time.time()) + 10
+            started_monotonic = float(current.get("started_monotonic") or 0.0)
+            recent_forced_renewal = bool(
+                force_new
+                and started_monotonic
+                and time.monotonic() - started_monotonic
+                < _FORCED_RENEWAL_COALESCE_SECONDS
+            )
+            if same_target and still_valid and (not force_new or recent_forced_renewal):
+                return self.pairing_payload()
         await self.async_cancel_pairing(publish=True)
 
         session_id = secrets.token_urlsafe(24)
@@ -411,6 +449,7 @@ class PresenceBridgeCoordinator:
             "person_entity_id": person_entity_id,
             "person_name": person_state.name,
             "expires_at": expires_at,
+            "started_monotonic": time.monotonic(),
             "private_key": private_key,
             "link": link,
         }
@@ -421,7 +460,7 @@ class PresenceBridgeCoordinator:
         )
         self._set_pairing_state(
             "preparing",
-            "Starting the secure Bluetooth service",
+            "Preparing the receiver to find the iPhone",
             person_entity_id=person_entity_id,
             person_name=person_state.name,
             observer_id=selected.observer_id,
@@ -495,7 +534,7 @@ class PresenceBridgeCoordinator:
         ).decode("ascii")
 
     async def async_cancel_pairing(self, *, publish: bool) -> None:
-        """Cancel the current pairing session and stop GATT advertising."""
+        """Cancel the current pairing session and stop Bluetooth enrollment."""
         session = self._pairing_session
         if session and publish:
             await mqtt.async_publish(
@@ -540,6 +579,8 @@ class PresenceBridgeCoordinator:
                     "detail_code",
                     "advertisement_status",
                     "advertisement_error",
+                    "gatt_host",
+                    "transport",
                 )
                 if payload.get(key) is not None
             },
@@ -629,7 +670,7 @@ class PresenceBridgeCoordinator:
             "label": f"iPhone - {session['person_name']}",
             "created_at": dt_util.now().isoformat(),
             "paired_by": session["observer_id"],
-            "protocol": 1,
+            "protocol": 2,
         }
         await self.store.async_save(self.memory)
         self._cipher_cache.pop(irk, None)

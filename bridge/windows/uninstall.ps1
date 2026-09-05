@@ -5,6 +5,7 @@
 param(
     [string]$InstallRoot = "$env:ProgramData\PresenceBridge",
     [string]$TaskName = "Presence Bridge",
+    [string]$GattTaskName = "Presence Bridge - GATT Host",
     [switch]$KeepConfiguration
 )
 
@@ -14,6 +15,13 @@ if ($task) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
+$gattTask = Get-ScheduledTask -TaskName $GattTaskName -ErrorAction SilentlyContinue
+if ($gattTask) {
+    Stop-ScheduledTask -TaskName $GattTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $GattTaskName -Confirm:$false
+}
+Get-AppxPackage -Name 'PresenceBridgeGattHost' -ErrorAction SilentlyContinue |
+    Remove-AppxPackage -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $InstallRoot) {
     if ($KeepConfiguration) {
         Get-ChildItem -LiteralPath $InstallRoot -Force |

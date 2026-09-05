@@ -10,7 +10,8 @@ param(
     [int]$MqttPort = 1883,
     [string]$MqttUsername,
     [string]$InstallRoot = "$env:ProgramData\PresenceBridge",
-    [string]$TaskName = "Presence Bridge"
+    [string]$TaskName = "Presence Bridge",
+    [string]$LegacyGattTaskName = "Presence Bridge - GATT Host"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,13 +64,22 @@ if ($existingTask -and $existingTask.State -eq 'Running') {
     }
 }
 
+# Protocol v2 uses Windows as the BLE central. Remove the v1 peripheral host
+# because it is no longer part of pairing and can otherwise confuse diagnosis.
+$legacyGattTask = Get-ScheduledTask -TaskName $LegacyGattTaskName -ErrorAction SilentlyContinue
+if ($legacyGattTask) {
+    Stop-ScheduledTask -TaskName $LegacyGattTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $LegacyGattTaskName -Confirm:$false
+}
+Get-AppxPackage -Name 'PresenceBridgeGattHost' -ErrorAction SilentlyContinue |
+    Remove-AppxPackage -ErrorAction SilentlyContinue
+
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $files = @(
+    'adapter_info.py',
     'observer.py',
-    'gatt_server.py',
     'protocol.py',
-    'verify_gatt.py',
-    'smoke_pairing.py',
+    'reverse_gatt_client.py',
     'requirements.txt'
 )
 foreach ($file in $files) {
@@ -85,9 +95,9 @@ $venvPython = Join-Path $venv 'Scripts\python.exe'
 & $venvPython -m pip install --disable-pip-version-check --upgrade pip
 & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallRoot 'requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Unable to install Presence Bridge dependencies.' }
-& $venvPython (Join-Path $InstallRoot 'verify_gatt.py') --seconds 1
-if ($LASTEXITCODE -ne 0) {
-    throw 'The Bluetooth adapter cannot host the Presence Pair GATT service.'
+$adapter = (& $venvPython (Join-Path $InstallRoot 'adapter_info.py') | ConvertFrom-Json)
+if (-not $adapter.adapter_found -or -not $adapter.is_low_energy_supported -or -not $adapter.is_central_role_supported) {
+    throw 'The Bluetooth adapter does not support the BLE central role required by Presence Bridge.'
 }
 
 $config = [ordered]@{
@@ -126,13 +136,9 @@ $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccou
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Local BLE presence observer and secure iPhone pairing bridge.'
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
-Start-Sleep -Seconds 4
+Start-Sleep -Seconds 5
 $state = (Get-ScheduledTask -TaskName $TaskName).State
-if ($state -notin @('Running', 'Ready')) { throw "Presence Bridge task state is $state." }
-& $venvPython (Join-Path $InstallRoot 'smoke_pairing.py') --config $configPath --timeout 20
-if ($LASTEXITCODE -ne 0) {
-    throw 'The running observer could not host the Presence Pair GATT service.'
-}
+if ($state -ne 'Running') { throw "Presence Bridge task state is $state." }
 
 Write-Host "Presence Bridge installed at $InstallRoot" -ForegroundColor Green
 Write-Host "Task: $TaskName ($state)" -ForegroundColor Green

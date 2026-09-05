@@ -145,13 +145,6 @@ class PresenceBridgePanel extends HTMLElement {
         body: this.text("The identity is now available to Home Assistant.", "L'identità è ora disponibile in Home Assistant."),
       };
     }
-    if (pairing.detail_code === "receiver_advertising_failed") {
-      return {
-        tone: "error",
-        title: this.text("The Dell receiver reported an error", "Il ricevitore Dell ha segnalato un errore"),
-        body: this.text("The iPhone cannot complete pairing until the receiver is advertising. Create a new code after the receiver is online.", "L'iPhone non può completare l'associazione finché il ricevitore non trasmette. Crea un nuovo codice quando il ricevitore è online."),
-      };
-    }
     if (pairing.state === "error") {
       return {
         tone: "error",
@@ -159,11 +152,18 @@ class PresenceBridgePanel extends HTMLElement {
         body: pairing.message || this.text("Create a new code and try again.", "Crea un nuovo codice e riprova."),
       };
     }
-    if (pairing.state === "timeout" || pairing.detail_code === "iphone_not_seen") {
+    if (pairing.state === "timeout" || pairing.detail_code === "waiting_for_iphone_advertisement") {
       return {
         tone: "warning",
-        title: this.text("The Dell did not receive the iPhone", "Il Dell non ha ricevuto l'iPhone"),
-        body: this.text("Nothing must be accepted on the Dell. Check the error code shown in Presence Pair, keep the app open and create a new code.", "Sul Dell non devi accettare nulla. Controlla il codice errore mostrato da Presence Pair, tieni aperta l'app e crea un nuovo codice."),
+        title: this.text("The Dell did not find the iPhone", "Il Dell non ha trovato l'iPhone"),
+        body: this.text("Keep Presence Pair open beside the selected receiver. Nothing must be accepted on the Dell; create a new code after checking Bluetooth on the iPhone.", "Tieni Presence Pair aperta accanto al ricevitore selezionato. Sul Dell non devi accettare nulla; controlla il Bluetooth dell'iPhone e crea un nuovo codice."),
+      };
+    }
+    if (["iphone_advertisement_seen", "iphone_connected", "iphone_session_verified"].includes(pairing.detail_code)) {
+      return {
+        tone: "",
+        title: this.text("iPhone found", "iPhone trovato"),
+        body: this.text("The Dell is completing the encrypted connection automatically. Keep Presence Pair open and tap Pair only if iOS asks.", "Il Dell sta completando automaticamente la connessione cifrata. Tieni Presence Pair aperta e tocca Abbina solo se lo chiede iOS."),
       };
     }
     if (pairing.state === "bonding" || pairing.detail_code === "iphone_claim_accepted") {
@@ -180,19 +180,19 @@ class PresenceBridgePanel extends HTMLElement {
         return {
           tone: "warning",
           title: this.text("Still waiting for the iPhone", "Ancora in attesa dell'iPhone"),
-          body: this.text("The Dell is ready. On the iPhone keep Presence Pair open, allow Bluetooth in Settings, and tap Try Bluetooth again. There is no confirmation to make on the Dell.", "Il Dell è pronto. Sull'iPhone tieni aperta Presence Pair, consenti il Bluetooth nelle Impostazioni e premi Riprova Bluetooth. Sul Dell non c'è alcuna conferma da dare."),
+          body: this.text("The Dell is searching. Keep the new Presence Pair screen open on the iPhone and verify that Bluetooth is allowed. There is no confirmation to make on the Dell.", "Il Dell sta cercando. Tieni aperta sull'iPhone la nuova schermata di Presence Pair e verifica che il Bluetooth sia consentito. Sul Dell non c'è alcuna conferma da dare."),
         };
       }
       return {
         tone: "",
         title: this.text("Scan and keep the app open", "Scansiona e tieni aperta l'app"),
-        body: this.text("Everything else is automatic. Only accept Allow or Pair if iOS shows a prompt; the Dell needs no action.", "Tutto il resto è automatico. Accetta Consenti o Abbina solo se iOS mostra una richiesta; sul Dell non devi fare nulla."),
+        body: this.text("The iPhone now becomes visible to the selected receiver. Everything else is automatic; tap Pair only if iOS asks.", "L'iPhone ora diventa visibile al ricevitore selezionato. Tutto il resto è automatico; tocca Abbina solo se lo chiede iOS."),
       };
     }
     return {
       tone: "",
       title: this.text("Preparing the Dell receiver", "Preparazione del ricevitore Dell"),
-      body: this.text("Wait until Home Assistant confirms that Bluetooth is advertising before scanning.", "Attendi che Home Assistant confermi la trasmissione Bluetooth prima di scansionare."),
+      body: this.text("Wait until Home Assistant confirms that the receiver is searching, then scan the code.", "Attendi che Home Assistant confermi che il ricevitore sta cercando, poi scansiona il codice."),
     };
   }
 
@@ -241,6 +241,7 @@ class PresenceBridgePanel extends HTMLElement {
         person: element.dataset.person,
         observer_id: element.dataset.observer,
         timeout_seconds: 180,
+        force_new: true,
       });
       this._loading = false;
       await this.load(true);

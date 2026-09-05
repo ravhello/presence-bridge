@@ -1,4 +1,4 @@
-"""Shared wire-format helpers for Presence Bridge protocol v1."""
+"""Shared wire-format helpers for Presence Bridge protocol v2."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 PAIRING_SCHEME = "presencepair"
 PAIRING_HOST = "pair"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_INVITATION_LIFETIME = 600
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,96}$")
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
@@ -143,6 +143,25 @@ def verify_claim(
     """Verify an app claim in constant time."""
     link.validate(now=now)
     return hmac.compare_digest(claim_proof(link), str(supplied_proof or ""))
+
+
+def acceptance_message(link: PairingLink) -> bytes:
+    """Return the canonical acknowledgement authenticated by the receiver."""
+    return (
+        f"presence-bridge-result:v{PROTOCOL_VERSION}\n"
+        f"{link.session_id}\n{link.observer_id}\n{link.expires_at}\naccepted"
+    ).encode("ascii")
+
+
+def acceptance_proof(link: PairingLink) -> str:
+    """Authenticate the receiver's successful verification for the iPhone."""
+    link.validate(allow_expired=True)
+    digest = hmac.new(
+        link.secret,
+        acceptance_message(link),
+        hashlib.sha256,
+    ).digest()
+    return b64url_encode(digest)
 
 
 def public_session_payload(link: PairingLink) -> dict[str, int | str]:

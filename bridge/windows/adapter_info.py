@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report the Windows Bluetooth roles needed by Presence Bridge."""
+"""Report Windows Bluetooth capabilities used by Presence Bridge."""
 
 from __future__ import annotations
 

@@ -34,6 +34,7 @@ START_PAIRING_SCHEMA = vol.Schema(
         vol.Optional("timeout_seconds", default=DEFAULT_PAIRING_TIMEOUT): vol.All(
             vol.Coerce(int), vol.Range(min=60, max=600)
         ),
+        vol.Optional("force_new", default=False): cv.boolean,
     }
 )
 SET_OBSERVER_AREA_SCHEMA = vol.Schema(
@@ -105,6 +106,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data["person"],
             call.data.get("observer_id"),
             call.data["timeout_seconds"],
+            force_new=call.data["force_new"],
         )
 
     async def cancel_pairing(call: ServiceCall) -> dict[str, Any]:
@@ -166,7 +168,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 "name": "presence-bridge-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "js_url": f"{STATIC_URL}/panel.js?v=2",
+                "js_url": f"{STATIC_URL}/panel.js?v=3",
             }
         },
         require_admin=True,
@@ -197,6 +199,7 @@ async def websocket_info(
         vol.Optional("timeout_seconds", default=DEFAULT_PAIRING_TIMEOUT): vol.All(
             vol.Coerce(int), vol.Range(min=60, max=600)
         ),
+        vol.Optional("force_new", default=False): cv.boolean,
     }
 )
 @websocket_api.require_admin
@@ -211,6 +214,7 @@ async def websocket_start_pairing(
             msg["person"],
             msg.get("observer_id"),
             msg["timeout_seconds"],
+            force_new=msg["force_new"],
         )
     except Exception as err:
         connection.send_error(msg["id"], "pairing_failed", str(err))

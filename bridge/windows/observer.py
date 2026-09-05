@@ -3,8 +3,9 @@
 
 The observer runs on an always-on Windows host, collects nearby BLE
 advertisements and publishes a bounded RSSI snapshot to Home Assistant over
-MQTT. Normal operation is passive; a temporary GATT service is created only
-after an authenticated administrator starts an app-assisted pairing session.
+MQTT. Normal operation is passive; during app-assisted pairing the observer
+temporarily becomes a BLE central and connects only to the authenticated GATT
+service advertised by Presence Pair.
 """
 
 from __future__ import annotations
@@ -12,7 +13,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import binascii
 import ctypes
+import hmac
 import json
 import logging
 import re
@@ -30,11 +33,12 @@ import paho.mqtt.client as mqtt
 from bleak import BleakScanner
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from gatt_server import GattPairingServer
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from protocol import PairingLink, ProtocolError, b64url_decode
+from reverse_gatt_client import ReverseGattError, ReverseGattPairingClient
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.3"
+BRIDGE_VERSION = "0.1.6"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -43,6 +47,7 @@ PAIRING_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,96}$")
 PRIVATE_BLE_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys"
 MAX_PAIRING_TIMEOUT_SECONDS = 600
 MIN_PAIRING_TIMEOUT_SECONDS = 60
+SCANNER_PAUSE_TIMEOUT_SECONDS = 10.0
 
 
 def mqtt_reason_is_failure(reason_code: Any) -> bool:
@@ -146,6 +151,45 @@ def select_new_irk_records(
         if re.fullmatch(r"[0-9A-F]{32}", irk) and irk not in known:
             selected.setdefault(irk, row)
     return list(selected.values())
+
+
+def select_irk_record_for_address(
+    records: list[dict[str, str]], address: str
+) -> dict[str, str] | None:
+    """Select the unique Windows IRK matching an identity address or BLE RPA."""
+    normalized = normalize_address(address)
+    if not normalized:
+        return None
+    direct = [
+        row
+        for row in records
+        if normalize_address(row.get("registry_leaf")) == normalized
+    ]
+    direct_by_irk = {
+        str(row.get("irk") or "").upper(): row
+        for row in direct
+        if re.fullmatch(r"[0-9A-F]{32}", str(row.get("irk") or "").upper())
+    }
+    if len(direct_by_irk) == 1:
+        return next(iter(direct_by_irk.values()))
+
+    raw_address = binascii.unhexlify(normalized.replace(":", ""))
+    if raw_address[0] & 0xC0 != 0x40:
+        return None
+    matches: dict[str, dict[str, str]] = {}
+    for row in records:
+        irk = str(row.get("irk") or "").upper()
+        if not re.fullmatch(r"[0-9A-F]{32}", irk):
+            continue
+        cipher = Cipher(algorithms.AES(bytes.fromhex(irk)), modes.ECB())
+        encryptor = cipher.encryptor()
+        ciphertext = (
+            encryptor.update(b"\x00" * 13 + raw_address[:3])
+            + encryptor.finalize()
+        )
+        if hmac.compare_digest(ciphertext[13:], raw_address[3:]):
+            matches.setdefault(irk, row)
+    return next(iter(matches.values())) if len(matches) == 1 else None
 
 
 def set_bluetooth_discoverable(enabled: bool) -> bool:
@@ -525,7 +569,36 @@ class BlePresenceObserver:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pairing_commands: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._active_pairing_task: asyncio.Task[Any] | None = None
+        self._active_pairing_action: str | None = None
+        self._active_pairing_session_id: str | None = None
+        self._scanner_pause_requested = asyncio.Event()
+        self._scanner_stopped = asyncio.Event()
+        self._scanner_stopped.set()
         self.mqtt.set_command_handler(self._receive_pairing_command)
+
+    async def _pause_scanner_for_pairing(self) -> None:
+        """Release the Bluetooth adapter before starting a pairing host."""
+        self._scanner_pause_requested.set()
+        try:
+            await asyncio.wait_for(
+                self._scanner_stopped.wait(),
+                timeout=SCANNER_PAUSE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            self._scanner_pause_requested.clear()
+            raise RuntimeError(
+                "The Bluetooth presence scan did not stop before pairing"
+            ) from None
+        except asyncio.CancelledError:
+            self._scanner_pause_requested.clear()
+            raise
+        LOGGER.info("Bluetooth presence scan paused for pairing")
+
+    def _resume_scanner_after_pairing(self) -> None:
+        """Allow passive presence scanning to resume after pairing."""
+        if self._scanner_pause_requested.is_set():
+            self._scanner_pause_requested.clear()
+            LOGGER.info("Bluetooth presence scan resuming after pairing")
 
     def _receive_pairing_command(self, payload: dict[str, Any]) -> None:
         if self._loop is not None:
@@ -562,6 +635,10 @@ class BlePresenceObserver:
                 if (
                     self._active_pairing_task is not None
                     and not self._active_pairing_task.done()
+                    and (
+                        not session_id
+                        or session_id == self._active_pairing_session_id
+                    )
                 ):
                     self._active_pairing_task.cancel()
                 continue
@@ -602,10 +679,23 @@ class BlePresenceObserver:
                     "Invalid pairing command",
                 )
                 continue
+            if (
+                self._active_pairing_task is not None
+                and not self._active_pairing_task.done()
+                and action == self._active_pairing_action
+                and session_id == self._active_pairing_session_id
+            ):
+                LOGGER.info(
+                    "Ignoring duplicate %s command for the active pairing session",
+                    action,
+                )
+                continue
             if self._active_pairing_task is not None:
                 self._active_pairing_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await self._active_pairing_task
+            self._active_pairing_action = action
+            self._active_pairing_session_id = session_id
             if action == "start_app_pairing":
                 self._active_pairing_task = asyncio.create_task(
                     self._run_app_pairing_session(
@@ -627,40 +717,73 @@ class BlePresenceObserver:
         timeout_seconds: int,
         gatt: dict[str, Any],
     ) -> None:
-        """Pair through an encrypted GATT write initiated by Presence Pair."""
-        server = GattPairingServer(
-            service_uuid=str(gatt["service_uuid"]),
-            session_uuid=str(gatt["session_uuid"]),
-            claim_uuid=str(gatt["claim_uuid"]),
-            result_uuid=str(gatt["result_uuid"]),
-        )
+        """Find the app's temporary GATT service and pair as the BLE central."""
+        scanner_paused = False
+        client: ReverseGattPairingClient | None = None
         try:
+            await self._pause_scanner_for_pairing()
+            scanner_paused = True
             baseline = await asyncio.to_thread(read_windows_private_ble_irks)
-            await server.async_start(link)
+
+            progress_states = {
+                "waiting_for_iphone_advertisement": "waiting_for_app",
+                "iphone_advertisement_seen": "connecting",
+                "iphone_connected": "verifying",
+                "iphone_session_verified": "bonding",
+                "iphone_bond_ready": "bonding",
+                "iphone_claim_received": "bonding",
+                "iphone_claim_rejected": "waiting_for_app",
+                "iphone_claim_accepted": "bonding",
+                "iphone_session_mismatch": "waiting_for_app",
+                "iphone_connection_failed": "connecting",
+            }
+
+            def publish_progress(detail_code: str, message: str) -> None:
+                self._publish_pairing_status(
+                    link.session_id,
+                    progress_states.get(detail_code, "waiting_for_app"),
+                    message,
+                    expires_at=link.expires_at,
+                    detail_code=detail_code,
+                    transport="iphone_peripheral",
+                )
+
+            client = ReverseGattPairingClient(
+                service_uuid=str(gatt["service_uuid"]),
+                session_uuid=str(gatt["session_uuid"]),
+                claim_uuid=str(gatt["claim_uuid"]),
+                result_uuid=str(gatt["result_uuid"]),
+                progress_callback=publish_progress,
+            )
             self._publish_pairing_status(
                 link.session_id,
                 "waiting_for_app",
-                "Bluetooth receiver is advertising; scan the QR code in Presence Pair",
+                "Receiver ready; scan the QR code and keep Presence Pair open",
                 expires_at=link.expires_at,
-                detail_code="waiting_for_iphone_ble",
-                advertisement_status=server.advertisement_status,
-                advertisement_error=server.advertisement_error,
+                detail_code="waiting_for_iphone_advertisement",
+                transport="iphone_peripheral",
             )
-            await server.async_wait_for_claim(timeout_seconds)
+            peer = await client.async_pair(link, timeout_seconds)
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
-                "Encrypted claim accepted automatically; capturing the private identity",
+                "Encrypted claim accepted; capturing the private identity",
                 detail_code="iphone_claim_accepted",
-                advertisement_status=server.advertisement_status,
-                advertisement_error=server.advertisement_error,
+                transport="iphone_peripheral",
             )
             deadline = time.monotonic() + min(30, timeout_seconds)
             while time.monotonic() < deadline:
                 current = await asyncio.to_thread(read_windows_private_ble_irks)
                 new_records = select_new_irk_records(baseline, current)
-                if len(new_records) == 1:
-                    record = new_records[0]
+                record = (
+                    new_records[0]
+                    if len(new_records) == 1
+                    else select_irk_record_for_address(
+                        new_records or current,
+                        peer.address,
+                    )
+                )
+                if record is not None:
                     encrypted = encrypt_pairing_result(
                         public_key,
                         {
@@ -692,22 +815,23 @@ class BlePresenceObserver:
                         link.session_id,
                         "identity_captured",
                         "Identity captured; Home Assistant is verifying it",
+                        detail_code="identity_captured",
+                        transport="iphone_peripheral",
                     )
                     return
                 if len(new_records) > 1:
                     raise RuntimeError("More than one new Bluetooth identity appeared")
                 await asyncio.sleep(1)
             raise RuntimeError(
-                "The encrypted bond did not create a new Windows identity"
+                "The secure bond completed, but its Windows IRK could not be identified"
             )
-        except TimeoutError:
+        except ReverseGattError as exc:
             self._publish_pairing_status(
                 link.session_id,
                 "timeout",
-                "The iPhone did not connect before the pairing code expired",
-                detail_code="iphone_not_seen",
-                advertisement_status=server.advertisement_status,
-                advertisement_error=server.advertisement_error,
+                str(exc),
+                detail_code=exc.detail_code,
+                transport="iphone_peripheral",
             )
         except asyncio.CancelledError:
             self._publish_pairing_status(
@@ -722,17 +846,12 @@ class BlePresenceObserver:
                 link.session_id,
                 "error",
                 str(exc) or type(exc).__name__,
-                detail_code=(
-                    "receiver_advertising_failed"
-                    if server.advertisement_status
-                    in {"not_started", "created", "stopped", "aborted"}
-                    else "pairing_failed"
-                ),
-                advertisement_status=server.advertisement_status,
-                advertisement_error=server.advertisement_error,
+                detail_code=getattr(client, "detail_code", None) or "pairing_failed",
+                transport="iphone_peripheral",
             )
         finally:
-            await server.async_stop()
+            if scanner_paused:
+                self._resume_scanner_after_pairing()
 
     async def _run_pairing_session(
         self,
@@ -740,7 +859,10 @@ class BlePresenceObserver:
         public_key: str,
         timeout_seconds: int,
     ) -> None:
+        scanner_paused = False
         try:
+            await self._pause_scanner_for_pairing()
+            scanner_paused = True
             baseline = await asyncio.to_thread(read_windows_private_ble_irks)
             discoverable = await asyncio.to_thread(set_bluetooth_discoverable, True)
             if not discoverable:
@@ -816,6 +938,8 @@ class BlePresenceObserver:
                 await asyncio.to_thread(set_bluetooth_discoverable, False)
             except Exception:
                 LOGGER.exception("Unable to disable Bluetooth discoverability")
+            if scanner_paused:
+                self._resume_scanner_after_pairing()
 
     def detection_callback(self, device: Any, advertisement: Any) -> None:
         address = normalize_address(getattr(device, "address", None))
@@ -907,6 +1031,15 @@ class BlePresenceObserver:
         self.mqtt.start()
         try:
             while not self.stop_event.is_set():
+                while (
+                    self._scanner_pause_requested.is_set()
+                    and not self.stop_event.is_set()
+                ):
+                    self._scanner_stopped.set()
+                    await self._sleep_or_stop(0.1)
+                if self.stop_event.is_set():
+                    break
+                self._scanner_stopped.clear()
                 try:
                     async with BleakScanner(
                         self.detection_callback,
@@ -920,7 +1053,10 @@ class BlePresenceObserver:
                     LOGGER.exception("Bluetooth scan failed")
                     self.mqtt.publish("error", type(exc).__name__)
                     await self._sleep_or_stop(self.config.retry_interval)
+                finally:
+                    self._scanner_stopped.set()
         finally:
+            self._scanner_stopped.set()
             pairing_loop.cancel()
             if self._active_pairing_task is not None:
                 self._active_pairing_task.cancel()
@@ -934,8 +1070,8 @@ class BlePresenceObserver:
         session_started = time.monotonic()
         restart_at = time.monotonic() + self.config.scanner_restart_interval
         first_publish = min(5.0, self.config.publish_interval)
-        await self._sleep_or_stop(first_publish)
-        if self.stop_event.is_set():
+        await self._sleep_or_scan_interrupt(first_publish)
+        if self.stop_event.is_set() or self._scanner_pause_requested.is_set():
             return
         self.publish_snapshot()
         while not self.stop_event.is_set():
@@ -943,7 +1079,11 @@ class BlePresenceObserver:
             if remaining <= 0:
                 LOGGER.info("Refreshing the Windows Bluetooth scan session")
                 return
-            await self._sleep_or_stop(min(self.config.publish_interval, remaining))
+            await self._sleep_or_scan_interrupt(
+                min(self.config.publish_interval, remaining)
+            )
+            if self._scanner_pause_requested.is_set():
+                return
             if not self.stop_event.is_set():
                 now_monotonic = time.monotonic()
                 last_activity = max(
@@ -968,6 +1108,24 @@ class BlePresenceObserver:
     async def _sleep_or_stop(self, delay: float) -> None:
         with suppress(TimeoutError):
             await asyncio.wait_for(self.stop_event.wait(), timeout=delay)
+
+    async def _sleep_or_scan_interrupt(self, delay: float) -> None:
+        """Sleep until shutdown, scanner pause, or the requested delay."""
+        stop_task = asyncio.create_task(self.stop_event.wait())
+        pause_task = asyncio.create_task(self._scanner_pause_requested.wait())
+        try:
+            await asyncio.wait(
+                {stop_task, pause_task},
+                timeout=delay,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for task in (stop_task, pause_task):
+                if not task.done():
+                    task.cancel()
+            for task in (stop_task, pause_task):
+                with suppress(asyncio.CancelledError):
+                    await task
 
 
 def configure_logging(path: str, verbose: bool) -> None:

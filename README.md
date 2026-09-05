@@ -22,7 +22,8 @@ Bluetooth addresses, and MQTT credentials never leave the local network.
 ## Requirements
 
 - Home Assistant 2025.1 or newer with MQTT configured;
-- Windows 10/11 with a Bluetooth LE adapter that supports peripheral mode;
+- Windows 10/11 with a Bluetooth LE adapter that supports active scanning and
+  central connections;
 - Python 3.11 or newer on each Windows observer;
 - Presence Pair on an iPhone running iOS 17 or newer.
 
@@ -51,8 +52,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 The installer asks for the observer name and MQTT credentials without placing
-the password in shell history. It installs a SYSTEM startup task with automatic
-restart and restricts the configuration directory to SYSTEM and Administrators.
+the password in shell history. It installs a SYSTEM startup task for passive
+scanning plus a signed, on-demand Windows GATT host for enrollment, then
+restricts the configuration directory to SYSTEM and Administrators.
 
 Assign every fixed observer to its Home Assistant area in the Presence Bridge
 panel. Room selection uses the observer with the strongest fresh signal.
@@ -63,7 +65,8 @@ panel. Room selection uses the observer with the strongest fresh signal.
 2. Select the person and the nearest Windows observer.
 3. Tap **Create code**.
 4. Open the code with Presence Pair or scan it in the app.
-5. Keep the iPhone close to the observer and accept the iOS Bluetooth prompt.
+5. Keep the app open near the observer; accept Pair only if iOS asks. The Dell
+   connects and accepts automatically.
 
 The invitation expires after three minutes and can be used only for its active
 session. See [Pairing protocol](docs/protocol.md) for the wire format and threat

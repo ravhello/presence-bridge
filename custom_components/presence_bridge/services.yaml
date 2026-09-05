@@ -25,7 +25,7 @@ start_pairing:
           mode: box
 cancel_pairing:
   name: Cancel pairing
-  description: Stop the active pairing session and Bluetooth advertisement.
+  description: Stop the active Bluetooth pairing session.
 set_observer_area:
   name: Set observer area
   description: Assign a fixed Bluetooth observer to a Home Assistant area.
@@ -49,4 +49,3 @@ remove_identity:
       required: true
       selector:
         text:
-

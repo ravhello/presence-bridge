@@ -33,8 +33,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Inserisci un ID stabile, per esempio `pc_salotto`, un nome leggibile e le
 credenziali di un utente MQTT dedicato. La password viene richiesta in modo
-interattivo e non compare nella cronologia dei comandi. Alla fine devono
-comparire sia la verifica GATT sia lo stato `Running` dell'attività pianificata.
+interattivo e non compare nella cronologia dei comandi. Alla fine deve comparire
+lo stato `Running` dell'attività pianificata.
 
 Quando il ricevitore appare nella plancia Presence Bridge, assegnagli la stanza
 in cui si trova. Il PC deve restare fisso: la stanza stimata corrisponde al
@@ -45,14 +45,15 @@ ricevitore che sente meglio l'iPhone.
 Apri **Presence Bridge** dalla barra laterale di HA, scegli la persona e il
 ricevitore più vicino, quindi premi **Crea codice**. Apri Presence Pair
 sull'iPhone, completa l'acquisto personale una sola volta e inquadra il QR.
-Il ricevitore Windows accetta automaticamente. Se iOS lo chiede, consenti a
-Presence Pair di usare il Bluetooth e attendi la conferma verde senza chiudere
-l'app. Sul Dell non devi premere o confermare nulla.
+L'iPhone diventa temporaneamente visibile al ricevitore selezionato, che si
+connette e accetta automaticamente. Se iOS lo chiede, consenti a Presence Pair
+di usare il Bluetooth o tocca **Abbina**, poi attendi la conferma verde senza
+chiudere l'app. Sul Dell non devi premere o confermare nulla.
 
 Se l'associazione non termina, leggi il titolo e il codice diagnostico mostrati
 dall'app: distinguono permesso Bluetooth, ricevitore non trovato, connessione,
-verifica del QR e legame cifrato. Nella plancia HA la riga **Dell BLE** conferma
-se il ricevitore sta davvero trasmettendo e **Nuovo codice** riavvia l'intero
+verifica del QR e legame cifrato. La plancia HA indica se il Dell sta cercando,
+ha trovato l'iPhone o ha aperto la connessione; **Nuovo codice** riavvia l'intero
 tentativo senza passaggi manuali sul PC.
 
 Il codice dura tre minuti. Non contiene password permanenti e, dopo
