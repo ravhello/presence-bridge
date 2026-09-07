@@ -54,6 +54,18 @@ def test_expired_invitation_is_rejected() -> None:
         PairingLink.from_uri(LINK.to_uri(), now=NOW + 181)
 
 
+def test_claim_can_finish_only_an_already_started_expired_invitation() -> None:
+    """The receiver may finish a claimed session without reopening its QR."""
+    with pytest.raises(ProtocolError, match="expired"):
+        verify_claim(LINK, claim_proof(LINK), now=NOW + 181)
+    assert verify_claim(
+        LINK,
+        claim_proof(LINK),
+        now=NOW + 181,
+        allow_expired=True,
+    )
+
+
 def test_invitation_lifetime_is_limited_to_ten_minutes() -> None:
     """Reject links that bypass the maximum timeout exposed by HA."""
     too_distant = PairingLink(

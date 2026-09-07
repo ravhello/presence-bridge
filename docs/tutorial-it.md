@@ -56,8 +56,12 @@ verifica del QR e legame cifrato. La plancia HA indica se il Dell sta cercando,
 ha trovato l'iPhone o ha aperto la connessione; **Nuovo codice** riavvia l'intero
 tentativo senza passaggi manuali sul PC.
 
-Il codice dura tre minuti. Non contiene password permanenti e, dopo
-l'associazione, l'app non deve restare aperta.
+Il codice e valido per dieci minuti per essere scansionato. Una scansione
+eseguita in tempo avvia sull'iPhone un tentativo separato di cinque minuti, che
+non viene interrotto dalla scadenza originaria. Appena il ricevitore verifica
+quella precisa sessione, il QR viene consumato e non puo piu essere riutilizzato.
+Non contiene password permanenti e, dopo l'associazione, l'app non deve restare
+aperta.
 
 ## 5. Verifica il risultato
 

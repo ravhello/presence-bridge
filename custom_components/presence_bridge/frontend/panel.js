@@ -6,6 +6,9 @@ class PresenceBridgePanel extends HTMLElement {
     this._loading = false;
     this._error = "";
     this._poll = null;
+    this._clock = null;
+    this._selectedPerson = "";
+    this._selectedObserver = "";
   }
 
   set hass(value) {
@@ -16,10 +19,12 @@ class PresenceBridgePanel extends HTMLElement {
   connectedCallback() {
     this.render();
     this._poll = window.setInterval(() => this.load(true), 2000);
+    this._clock = window.setInterval(() => this.tickCountdowns(), 1000);
   }
 
   disconnectedCallback() {
     if (this._poll) window.clearInterval(this._poll);
+    if (this._clock) window.clearInterval(this._clock);
   }
 
   async load(quiet = false) {
@@ -51,9 +56,13 @@ class PresenceBridgePanel extends HTMLElement {
 
   render() {
     if (!this.shadowRoot) return;
+    this._selectedPerson = this.shadowRoot.querySelector("#person")?.value || this._selectedPerson;
+    this._selectedObserver = this.shadowRoot.querySelector("#observer")?.value || this._selectedObserver;
     const data = this._data || { people: [], observers: [], identities: [], pairing: {}, areas: [] };
     const pairing = data.pairing || {};
     const availableObservers = data.observers.filter((item) => item.online && item.capabilities?.includes("app_pairing"));
+    if (!data.people.some((item) => item.entity_id === this._selectedPerson)) this._selectedPerson = data.people[0]?.entity_id || "";
+    if (!availableObservers.some((item) => item.observer_id === this._selectedObserver)) this._selectedObserver = availableObservers[0]?.observer_id || "";
     this.shadowRoot.innerHTML = `
       <style>
         :host { display:block; min-height:100%; color:var(--primary-text-color); background:var(--primary-background-color); }
@@ -87,6 +96,10 @@ class PresenceBridgePanel extends HTMLElement {
         .guidance.warning { border-left-color:var(--warning-color,#f0a000); }
         .guidance.error { border-left-color:var(--error-color); }
         .guidance b { font-size:14px; }
+        .lease { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:6px; background:var(--secondary-background-color); }
+        .lease ha-icon { flex:0 0 auto; margin-top:1px; color:var(--primary-color); }
+        .lease span { display:block; }
+        .lease .countdown { margin-top:3px; color:var(--secondary-text-color); font-size:13px; font-variant-numeric:tabular-nums; }
         .diagnostic { font:12px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--secondary-text-color); }
         .actions { display:flex; flex-wrap:wrap; gap:8px; }
         table { width:100%; border-collapse:collapse; }
@@ -114,8 +127,8 @@ class PresenceBridgePanel extends HTMLElement {
           <h2>${this.text("Pair an iPhone", "Associa un iPhone")}</h2>
           ${pairing.active || ["complete","error","timeout"].includes(pairing.state) ? this.pairingView(pairing) : `
             <div class="form">
-              <label>${this.text("Person", "Persona")}<select id="person">${data.people.map((item) => `<option value="${this.escape(item.entity_id)}">${this.escape(item.name)}</option>`).join("")}</select></label>
-              <label>${this.text("Bridge", "Bridge")}<select id="observer">${availableObservers.map((item) => `<option value="${this.escape(item.observer_id)}">${this.escape(item.name)}</option>`).join("")}</select></label>
+              <label>${this.text("Person", "Persona")}<select id="person">${data.people.map((item) => `<option value="${this.escape(item.entity_id)}" ${item.entity_id === this._selectedPerson ? "selected" : ""}>${this.escape(item.name)}</option>`).join("")}</select></label>
+              <label>${this.text("Bridge", "Bridge")}<select id="observer">${availableObservers.map((item) => `<option value="${this.escape(item.observer_id)}" ${item.observer_id === this._selectedObserver ? "selected" : ""}>${this.escape(item.name)}</option>`).join("")}</select></label>
               <button class="primary" data-action="start" ${!data.people.length || !availableObservers.length ? "disabled" : ""}><ha-icon icon="mdi:qrcode-scan"></ha-icon>${this.text("Create code", "Crea codice")}</button>
             </div>`}
         </section>
@@ -125,16 +138,45 @@ class PresenceBridgePanel extends HTMLElement {
         </section>
       </main>`;
     this.bind();
+    this.tickCountdowns();
   }
 
   pairingView(pairing) {
     const terminal = ["complete", "error", "timeout"].includes(pairing.state);
     const guidance = this.pairingGuidance(pairing);
     const canRenew = pairing.person_entity_id && pairing.observer_id && pairing.state !== "complete";
+    const invitationConsumed = Boolean(pairing.invitation_consumed);
+    const deadline = this.pairingDeadline(pairing);
     return `<div class="pairing">
-      ${pairing.qr_data_uri && !terminal ? `<div class="qr"><img alt="Pairing QR" src="${pairing.qr_data_uri}"></div>` : `<ha-icon icon="${pairing.state === "complete" ? "mdi:check-circle" : "mdi:bluetooth-connect"}" style="--mdc-icon-size:96px;color:var(--primary-color)"></ha-icon>`}
-      <div class="pair-info"><strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span>${guidance ? `<div class="guidance ${guidance.tone}"><b>${this.escape(guidance.title)}</b><span>${this.escape(guidance.body)}</span>${pairing.advertisement_status ? `<span class="diagnostic">Dell BLE: ${this.escape(pairing.advertisement_status)}${pairing.advertisement_error && pairing.advertisement_error !== "success" && pairing.advertisement_error !== "none" ? ` · ${this.escape(pairing.advertisement_error)}` : ""}</span>` : ""}</div>` : ""}<div class="actions">${pairing.pairing_uri && !terminal ? `<a class="action primary" href="${this.escape(pairing.pairing_uri)}"><ha-icon icon="mdi:apple"></ha-icon>${this.text("Open Presence Pair", "Apri Presence Pair")}</a>` : ""}${canRenew ? `<button class="secondary" data-action="restart" data-person="${this.escape(pairing.person_entity_id)}" data-observer="${this.escape(pairing.observer_id)}"><ha-icon icon="mdi:qrcode-plus"></ha-icon>${this.text("New code", "Nuovo codice")}</button>` : ""}<button class="secondary" data-action="cancel"><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button></div></div>
+      ${pairing.qr_data_uri && !terminal && !invitationConsumed ? `<div class="qr"><img alt="Pairing QR" src="${pairing.qr_data_uri}"></div>` : `<ha-icon icon="${pairing.state === "complete" ? "mdi:check-circle" : "mdi:bluetooth-connect"}" style="--mdc-icon-size:96px;color:var(--primary-color)"></ha-icon>`}
+      <div class="pair-info"><strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span>${deadline}${guidance ? `<div class="guidance ${guidance.tone}"><b>${this.escape(guidance.title)}</b><span>${this.escape(guidance.body)}</span>${pairing.advertisement_status ? `<span class="diagnostic">Dell BLE: ${this.escape(pairing.advertisement_status)}${pairing.advertisement_error && pairing.advertisement_error !== "success" && pairing.advertisement_error !== "none" ? ` · ${this.escape(pairing.advertisement_error)}` : ""}</span>` : ""}</div>` : ""}<div class="actions">${pairing.pairing_uri && !terminal && !invitationConsumed ? `<a class="action primary" href="${this.escape(pairing.pairing_uri)}"><ha-icon icon="mdi:apple"></ha-icon>${this.text("Open Presence Pair", "Apri Presence Pair")}</a>` : ""}${canRenew ? `<button class="secondary" data-action="restart" data-person="${this.escape(pairing.person_entity_id)}" data-observer="${this.escape(pairing.observer_id)}"><ha-icon icon="mdi:qrcode-plus"></ha-icon>${this.text("New code", "Nuovo codice")}</button>` : ""}<button class="secondary" data-action="cancel"><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button></div></div>
     </div>`;
+  }
+
+  pairingDeadline(pairing) {
+    if (["complete", "error", "timeout"].includes(pairing.state)) return "";
+    const consumed = Boolean(pairing.invitation_consumed);
+    const handoff = Boolean(pairing.handoff_started) && !consumed;
+    const expiresAt = Number(
+      pairing.completion_expires_at || pairing.attempt_expires_at || pairing.expires_at || 0,
+    );
+    const seconds = Math.max(0, Math.ceil(expiresAt - Date.now() / 1000));
+    const remaining = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    if (consumed) {
+      return `<div class="lease"><ha-icon icon="mdi:shield-check"></ha-icon><div><span><b>${this.text("Code accepted", "Codice acquisito")}</b> · ${this.text("The QR expiry can no longer interrupt this attempt.", "La scadenza del QR non può più interrompere questo tentativo.")}</span><span class="countdown" data-deadline="${expiresAt}" data-label="${this.escape(this.text("Maximum time to complete", "Tempo massimo per completare"))}">${this.text("Maximum time to complete", "Tempo massimo per completare")}: ${remaining}</span></div></div>`;
+    }
+    if (handoff) {
+      return `<div class="lease"><ha-icon icon="mdi:cellphone-link"></ha-icon><div><span><b>${this.text("iPhone detected", "iPhone rilevato")}</b> · ${this.text("The receiver is verifying this exact QR session.", "Il ricevitore sta verificando questa precisa sessione QR.")}</span><span class="countdown" data-deadline="${expiresAt}" data-label="${this.escape(this.text("Time to verify", "Tempo per la verifica"))}">${this.text("Time to verify", "Tempo per la verifica")}: ${remaining}</span></div></div>`;
+    }
+    return `<div class="lease"><ha-icon icon="mdi:timer-outline"></ha-icon><div><span>${this.text("This code only limits when pairing may start. Once the iPhone is recognized, pairing continues in a separate completion window.", "Questo codice limita solo l'avvio. Dopo il riconoscimento dell'iPhone, il collegamento continua in una finestra separata.")}</span><span class="countdown" data-deadline="${expiresAt}" data-label="${this.escape(this.text("Valid to start for", "Valido per iniziare ancora"))}">${this.text("Valid to start for", "Valido per iniziare ancora")}: ${remaining}</span></div></div>`;
+  }
+
+  tickCountdowns() {
+    this.shadowRoot?.querySelectorAll("[data-deadline]").forEach((element) => {
+      const seconds = Math.max(0, Math.ceil(Number(element.dataset.deadline || 0) - Date.now() / 1000));
+      const remaining = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+      element.textContent = `${element.dataset.label || ""}: ${remaining}`;
+    });
   }
 
   pairingGuidance(pairing) {
@@ -150,6 +192,20 @@ class PresenceBridgePanel extends HTMLElement {
         tone: "error",
         title: this.text("Pairing stopped with an error", "Associazione interrotta da un errore"),
         body: pairing.message || this.text("Create a new code and try again.", "Crea un nuovo codice e riprova."),
+      };
+    }
+    if (pairing.detail_code === "legacy_receiver_advertising") {
+      return {
+        tone: "",
+        title: this.text("Dell receiver visible", "Ricevitore Dell visibile"),
+        body: this.text("Presence Pair is searching for this Dell automatically. Keep the scanned-code screen open; no Windows confirmation is required.", "Presence Pair sta cercando automaticamente questo Dell. Tieni aperta la schermata del codice scansionato; su Windows non serve alcuna conferma."),
+      };
+    }
+    if (pairing.detail_code === "windows_adapter_recovering") {
+      return {
+        tone: "warning",
+        title: this.text("Bluetooth adapter recovery", "Ripristino adattatore Bluetooth"),
+        body: this.text("Windows is reopening the adapter without restarting the computer. Keep Presence Pair open while it retries.", "Windows sta riaprendo l'adattatore senza riavviare il computer. Tieni Presence Pair aperta durante il nuovo tentativo."),
       };
     }
     if (pairing.state === "timeout" || pairing.detail_code === "waiting_for_iphone_advertisement") {
@@ -203,6 +259,8 @@ class PresenceBridgePanel extends HTMLElement {
     this.shadowRoot.querySelector('[data-action="cancel"]')?.addEventListener("click", () => this.cancelPairing());
     this.shadowRoot.querySelectorAll('[data-action="area"]').forEach((element) => element.addEventListener("change", (event) => this.setObserverArea(event.currentTarget)));
     this.shadowRoot.querySelectorAll('[data-action="remove"]').forEach((element) => element.addEventListener("click", (event) => this.removeIdentity(event.currentTarget)));
+    this.shadowRoot.querySelector("#person")?.addEventListener("change", (event) => { this._selectedPerson = event.currentTarget.value; });
+    this.shadowRoot.querySelector("#observer")?.addEventListener("change", (event) => { this._selectedObserver = event.currentTarget.value; });
   }
 
   async startPairing() {
@@ -211,7 +269,7 @@ class PresenceBridgePanel extends HTMLElement {
     if (!person || !observer || this._loading) return;
     this._loading = true;
     try {
-      await this._hass.callWS({ type: "presence_bridge/start_pairing", person, observer_id: observer, timeout_seconds: 180 });
+      await this._hass.callWS({ type: "presence_bridge/start_pairing", person, observer_id: observer, timeout_seconds: 600 });
       this._loading = false;
       await this.load(true);
     } catch (error) {
@@ -240,7 +298,7 @@ class PresenceBridgePanel extends HTMLElement {
         type: "presence_bridge/start_pairing",
         person: element.dataset.person,
         observer_id: element.dataset.observer,
-        timeout_seconds: 180,
+        timeout_seconds: 600,
         force_new: true,
       });
       this._loading = false;

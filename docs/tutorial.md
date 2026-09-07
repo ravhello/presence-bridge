@@ -56,8 +56,11 @@ encrypted-bond failures. The HA panel reports whether the Dell is searching,
 has found the iPhone, or has opened the connection. **New code** restarts the whole attempt
 without a manual step on the computer.
 
-The default code expires after three minutes. It contains no permanent Home
-Assistant password, and the app does not need to remain open after pairing.
+The code is valid for ten minutes to scan. A scan completed in time starts a
+separate five-minute attempt on the iPhone that is no longer interrupted by the
+original expiry. As soon as the receiver verifies that exact session, the QR is
+consumed and cannot be reused. It contains no permanent Home Assistant password,
+and the app does not need to remain open after pairing.
 
 ## 5. Verify the result
 

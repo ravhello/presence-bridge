@@ -2,6 +2,88 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.17 - 2026-09-07
+
+- Keep a QR code valid for ten minutes only as an invitation to start pairing.
+  Once the matching iPhone session is read, consume the invitation and grant a
+  separate five-minute window so its original expiry cannot interrupt the bond.
+- Show separate start, handoff, and completion countdowns in Home Assistant,
+  and remove the QR as soon as the authenticated session takes ownership.
+
+## 0.1.16 - 2026-09-07
+
+- Preserve a newly accepted Windows/iPhone bond while WinRT settles and retry
+  the authenticated claim without showing a second pairing prompt.
+- Avoid hiding the dynamic iOS GATT service behind characteristic-level link
+  encryption; the one-time HMAC claim still authenticates both endpoints.
+
+## 0.1.15 - 2026-09-07
+
+- Use the Dell GATT-peripheral route for the currently distributed iPhone
+  build, and keep the receiver scanner paused so one adapter never performs
+  incompatible Bluetooth roles concurrently.
+
+## 0.1.14 - 2026-09-07
+
+- Accept the truncated `Presence` local name that iOS can emit when the
+  128-bit pairing service consumes the main Bluetooth advertisement.
+
+## 0.1.13 - 2026-09-07
+
+- Support both GATT roles while selecting exactly one from the invitation
+  protocol, so a single-adapter receiver never blocks its own Bluetooth scan.
+- Keep the compatibility server available for older invitations while routing
+  current protocol-v2 app sessions through the iPhone peripheral transport.
+- Retry transient WinRT adapter loss during reverse scanning instead of ending
+  the complete QR session immediately.
+- Detect the temporary iPhone peripheral from its service list, service data,
+  or exact Presence Pair local name when either platform omits redundant
+  advertisement fields.
+
+## 0.1.11 - 2026-09-07
+
+- Run the short-lived WinRT GATT exchange in the logged-in user's Bluetooth
+  session while retaining the always-on scanner and protected IRK extraction
+  under the LocalSystem observer.
+- Install a bounded on-demand pairing task with atomic, access-controlled local
+  command and progress files for unattended receiver operation.
+- Enable detailed local Bleak client diagnostics only in the short-lived helper.
+
+## 0.1.10 - 2026-09-07
+
+- Prefer Windows' native GATT cache policy and add a pair-before-discovery
+  fallback for iPhone services whose protected characteristics prevent initial
+  enumeration.
+- Clear a matching stale Presence Pair bond once after all compatible WinRT
+  routes fail, then retry the same active QR invitation.
+- Log the matching advertisement's address type and radio strength so receiver
+  failures can be separated from iPhone advertising failures.
+
+## 0.1.9 - 2026-09-06
+
+- Keep receiver health and current progress alive while an app-assisted GATT
+  pairing temporarily pauses passive scans.
+- Cancel orphaned receiver sessions automatically after a Home Assistant
+  restart, when their in-memory encryption key can no longer be recovered.
+- Include the receiver's friendly name in new pairing invitations while
+  retaining the stable technical identifier on the wire.
+
+## 0.1.8 - 2026-09-06
+
+- Recover automatically when a stale Windows/iPhone bond blocks GATT service
+  discovery before the active QR session can be read.
+
+## 0.1.7 - 2026-09-06
+
+- Connect to iPhone peripheral advertisements with their WinRT random address
+  type and bypass stale Windows GATT service caches.
+- Retry connection through bounded service-discovery fallbacks and replace a
+  stale bond only after the phone proves it scanned the active QR invitation.
+- Treat pairing progress as an observer heartbeat so the receiver remains
+  online while the normal BLE scan is intentionally paused.
+- Add detailed, privacy-safe connection diagnostics for future adapter and
+  driver failures.
+
 ## 0.1.6 - 2026-09-05
 
 - Reverse the enrollment transport so Presence Pair temporarily advertises the

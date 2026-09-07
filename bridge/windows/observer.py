@@ -35,10 +35,16 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from protocol import PairingLink, ProtocolError, b64url_decode
-from reverse_gatt_client import ReverseGattError, ReverseGattPairingClient
+from reverse_gatt_client import (
+    PAIRING_COMPLETION_GRACE_SECONDS,
+    PAIRING_HANDOFF_GRACE_SECONDS,
+    ReverseGattError,
+    ReverseGattPairingClient,
+    ReverseGattResult,
+)
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.6"
+BRIDGE_VERSION = "0.1.17"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -48,6 +54,8 @@ PRIVATE_BLE_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Services\BTHPORT\Paramete
 MAX_PAIRING_TIMEOUT_SECONDS = 600
 MIN_PAIRING_TIMEOUT_SECONDS = 60
 SCANNER_PAUSE_TIMEOUT_SECONDS = 10.0
+PAIRING_HEARTBEAT_SECONDS = 10.0
+APP_PAIRING_TRANSPORT = "iphone_peripheral"
 
 
 def mqtt_reason_is_failure(reason_code: Any) -> bool:
@@ -289,6 +297,9 @@ class ObserverConfig:
     topic_root: str = "presence_bridge/v1/observers"
     legacy_topic_root: str = "smart_presence/ble"
     app_pairing_enabled: bool = True
+    interactive_pairing_task: str = ""
+    interactive_pairing_command_path: str = ""
+    interactive_pairing_result_path: str = ""
 
     @classmethod
     def load(cls, path: Path) -> ObserverConfig:
@@ -323,6 +334,17 @@ class ObserverConfig:
             .strip()
             .strip("/"),
             app_pairing_enabled=bool(raw.get("app_pairing_enabled", True)),
+            interactive_pairing_task=str(
+                raw.get("interactive_pairing_task") or ""
+            ).strip(),
+            interactive_pairing_command_path=str(
+                raw.get("interactive_pairing_command_path")
+                or path.parent / "interactive-pairing-command.json"
+            ),
+            interactive_pairing_result_path=str(
+                raw.get("interactive_pairing_result_path")
+                or path.parent / "interactive-pairing-result.json"
+            ),
         )
         if not OBSERVER_ID_RE.fullmatch(config.observer_id):
             raise ValueError(
@@ -626,6 +648,30 @@ class BlePresenceObserver:
         self.mqtt.publish_bridge_json("pairing/status", payload)
         self.mqtt.publish_json(f"{self.mqtt.base}/pairing/status", payload)
 
+    def _publish_observer_heartbeat(self) -> None:
+        """Keep HA aware that the receiver is alive while scanning is paused."""
+        self.mqtt.publish_bridge_json(
+            "status",
+            self.mqtt.status_payload(online=True),
+        )
+        self.mqtt.publish("availability", "online")
+
+    async def _pairing_heartbeat_loop(
+        self,
+        session_id: str,
+        progress: dict[str, Any],
+    ) -> None:
+        """Republish pairing progress until the GATT session finishes."""
+        while not self.stop_event.is_set():
+            self._publish_observer_heartbeat()
+            self._publish_pairing_status(
+                session_id,
+                str(progress["state"]),
+                str(progress["message"]),
+                **dict(progress.get("extra") or {}),
+            )
+            await self._sleep_or_stop(PAIRING_HEARTBEAT_SECONDS)
+
     async def _pairing_command_loop(self) -> None:
         while not self.stop_event.is_set():
             payload = await self._pairing_commands.get()
@@ -717,9 +763,20 @@ class BlePresenceObserver:
         timeout_seconds: int,
         gatt: dict[str, Any],
     ) -> None:
-        """Find the app's temporary GATT service and pair as the BLE central."""
+        """Run the GATT role supported by the installed Presence Pair build."""
         scanner_paused = False
         client: ReverseGattPairingClient | None = None
+        heartbeat_task: asyncio.Task[None] | None = None
+        pairing_transport = APP_PAIRING_TRANSPORT
+        progress: dict[str, Any] = {
+            "state": "waiting_for_app",
+            "message": "Receiver ready; scan the QR code and keep Presence Pair open",
+            "extra": {
+                "expires_at": link.expires_at,
+                "detail_code": "waiting_for_iphone_advertisement",
+                "transport": pairing_transport,
+            },
+        }
         try:
             await self._pause_scanner_for_pairing()
             scanner_paused = True
@@ -731,45 +788,77 @@ class BlePresenceObserver:
                 "iphone_connected": "verifying",
                 "iphone_session_verified": "bonding",
                 "iphone_bond_ready": "bonding",
+                "iphone_bond_settling": "bonding",
                 "iphone_claim_received": "bonding",
                 "iphone_claim_rejected": "waiting_for_app",
                 "iphone_claim_accepted": "bonding",
                 "iphone_session_mismatch": "waiting_for_app",
                 "iphone_connection_failed": "connecting",
+                "iphone_connection_retry": "connecting",
+                "iphone_bond_reset": "bonding",
+                "legacy_receiver_advertising": "waiting_for_app",
+                "windows_adapter_recovering": "waiting_for_app",
             }
 
-            def publish_progress(detail_code: str, message: str) -> None:
+            def publish_progress(
+                detail_code: str,
+                message: str,
+                **reported_lease: Any,
+            ) -> None:
+                lease = dict(reported_lease)
+                if client is not None:
+                    lease.update(client.lease_payload)
+                progress.update(
+                    {
+                        "state": progress_states.get(
+                            detail_code,
+                            "waiting_for_app",
+                        ),
+                        "message": message,
+                        "extra": {
+                            "expires_at": link.expires_at,
+                            "detail_code": detail_code,
+                            "transport": pairing_transport,
+                            **lease,
+                        },
+                    }
+                )
                 self._publish_pairing_status(
                     link.session_id,
-                    progress_states.get(detail_code, "waiting_for_app"),
+                    str(progress["state"]),
                     message,
-                    expires_at=link.expires_at,
-                    detail_code=detail_code,
-                    transport="iphone_peripheral",
+                    **dict(progress["extra"]),
                 )
 
-            client = ReverseGattPairingClient(
-                service_uuid=str(gatt["service_uuid"]),
-                session_uuid=str(gatt["session_uuid"]),
-                claim_uuid=str(gatt["claim_uuid"]),
-                result_uuid=str(gatt["result_uuid"]),
-                progress_callback=publish_progress,
-            )
-            self._publish_pairing_status(
-                link.session_id,
-                "waiting_for_app",
+            publish_progress(
+                "waiting_for_iphone_advertisement",
                 "Receiver ready; scan the QR code and keep Presence Pair open",
-                expires_at=link.expires_at,
-                detail_code="waiting_for_iphone_advertisement",
-                transport="iphone_peripheral",
             )
-            peer = await client.async_pair(link, timeout_seconds)
+            heartbeat_task = asyncio.create_task(
+                self._pairing_heartbeat_loop(link.session_id, progress)
+            )
+            if self.config.interactive_pairing_task:
+                peer = await self._run_interactive_app_pairing(
+                    link,
+                    timeout_seconds,
+                    gatt,
+                    publish_progress,
+                )
+            else:
+                client = ReverseGattPairingClient(
+                    service_uuid=str(gatt["service_uuid"]),
+                    session_uuid=str(gatt["session_uuid"]),
+                    claim_uuid=str(gatt["claim_uuid"]),
+                    result_uuid=str(gatt["result_uuid"]),
+                    progress_callback=publish_progress,
+                )
+                peer = await client.async_pair(link, timeout_seconds)
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
                 "Encrypted claim accepted; capturing the private identity",
                 detail_code="iphone_claim_accepted",
-                transport="iphone_peripheral",
+                transport=peer.transport,
             )
             deadline = time.monotonic() + min(30, timeout_seconds)
             while time.monotonic() < deadline:
@@ -816,7 +905,7 @@ class BlePresenceObserver:
                         "identity_captured",
                         "Identity captured; Home Assistant is verifying it",
                         detail_code="identity_captured",
-                        transport="iphone_peripheral",
+                        transport=peer.transport,
                     )
                     return
                 if len(new_records) > 1:
@@ -831,7 +920,7 @@ class BlePresenceObserver:
                 "timeout",
                 str(exc),
                 detail_code=exc.detail_code,
-                transport="iphone_peripheral",
+                transport=pairing_transport,
             )
         except asyncio.CancelledError:
             self._publish_pairing_status(
@@ -847,11 +936,165 @@ class BlePresenceObserver:
                 "error",
                 str(exc) or type(exc).__name__,
                 detail_code=getattr(client, "detail_code", None) or "pairing_failed",
-                transport="iphone_peripheral",
+                transport=pairing_transport,
             )
         finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task
             if scanner_paused:
                 self._resume_scanner_after_pairing()
+
+    async def _run_interactive_app_pairing(
+        self,
+        link: PairingLink,
+        timeout_seconds: int,
+        gatt: dict[str, Any],
+        progress_callback: Any,
+    ) -> ReverseGattResult:
+        """Delegate WinRT GATT to the logged-in user's Bluetooth session."""
+        command_path = Path(self.config.interactive_pairing_command_path)
+        result_path = Path(self.config.interactive_pairing_result_path)
+        command_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        command_path.unlink(missing_ok=True)
+        result_path.unlink(missing_ok=True)
+        temporary = command_path.with_suffix(command_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "session_id": link.session_id,
+                    "pairing_uri": link.to_uri(),
+                    "timeout_seconds": timeout_seconds,
+                    "transport": APP_PAIRING_TRANSPORT,
+                    "gatt": gatt,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(command_path)
+
+        async def task_command(action: str, *, required: bool) -> None:
+            process = await asyncio.create_subprocess_exec(
+                "schtasks.exe",
+                action,
+                "/TN",
+                self.config.interactive_pairing_task,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
+            if required and process.returncode != 0:
+                detail = (stderr or stdout).decode(errors="replace").strip()
+                raise ReverseGattError(
+                    f"The interactive Windows Bluetooth helper did not start: {detail}",
+                    "interactive_receiver_unavailable",
+                )
+
+        await task_command("/End", required=False)
+        await task_command("/Run", required=True)
+        deadline = min(
+            time.monotonic() + timeout_seconds,
+            time.monotonic() + max(1, link.expires_at - int(time.time())),
+        )
+        last_update: tuple[str, str] | None = None
+        handoff_started = False
+        completion_started = False
+        try:
+            while True:
+                if result_path.is_file():
+                    try:
+                        payload = json.loads(
+                            result_path.read_text(encoding="utf-8-sig")
+                        )
+                    except (OSError, json.JSONDecodeError):
+                        await asyncio.sleep(0.25)
+                        continue
+                    if payload.get("session_id") != link.session_id:
+                        await asyncio.sleep(0.25)
+                        continue
+                    state = str(payload.get("state") or "")
+                    detail_code = str(
+                        payload.get("detail_code") or "interactive_pairing"
+                    )
+                    message = str(payload.get("message") or detail_code)
+                    reported_lease: dict[str, int] = {}
+                    now_epoch = int(time.time())
+                    now_monotonic = time.monotonic()
+                    try:
+                        attempt_expires_at = int(payload.get("attempt_expires_at") or 0)
+                    except (TypeError, ValueError):
+                        attempt_expires_at = 0
+                    try:
+                        completion_expires_at = int(
+                            payload.get("completion_expires_at") or 0
+                        )
+                    except (TypeError, ValueError):
+                        completion_expires_at = 0
+                    if completion_expires_at > now_epoch:
+                        deadline = now_monotonic + completion_expires_at - now_epoch
+                        completion_started = True
+                        reported_lease["completion_expires_at"] = completion_expires_at
+                    elif attempt_expires_at > now_epoch and not completion_started:
+                        deadline = now_monotonic + attempt_expires_at - now_epoch
+                        handoff_started = True
+                        reported_lease["attempt_expires_at"] = attempt_expires_at
+                    elif (
+                        detail_code
+                        in {"iphone_advertisement_seen", "iphone_connected"}
+                        and not handoff_started
+                        and not completion_started
+                    ):
+                        deadline = now_monotonic + PAIRING_HANDOFF_GRACE_SECONDS
+                        handoff_started = True
+                        reported_lease["attempt_expires_at"] = int(
+                            time.time() + PAIRING_HANDOFF_GRACE_SECONDS
+                        )
+                    elif (
+                        detail_code
+                        in {
+                            "iphone_session_verified",
+                            "iphone_bond_ready",
+                            "iphone_bond_settling",
+                            "iphone_bond_reconnecting",
+                            "iphone_claim_received",
+                            "iphone_claim_accepted",
+                        }
+                        and not completion_started
+                    ):
+                        deadline = now_monotonic + PAIRING_COMPLETION_GRACE_SECONDS
+                        completion_started = True
+                        reported_lease["completion_expires_at"] = int(
+                            time.time() + PAIRING_COMPLETION_GRACE_SECONDS
+                        )
+                    update = (detail_code, message)
+                    if state == "progress" and update != last_update:
+                        last_update = update
+                        progress_callback(detail_code, message, **reported_lease)
+                    elif state == "success":
+                        return ReverseGattResult(
+                            address=str(payload.get("address") or ""),
+                            name=str(payload.get("name") or "Presence Pair iPhone"),
+                            transport=str(
+                                payload.get("transport") or APP_PAIRING_TRANSPORT
+                            ),
+                        )
+                    elif state == "error":
+                        raise ReverseGattError(message, detail_code)
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.35)
+            raise ReverseGattError(
+                "The logged-in Windows Bluetooth session timed out",
+                "interactive_receiver_timeout",
+            )
+        finally:
+            await task_command("/End", required=False)
+            command_path.unlink(missing_ok=True)
 
     async def _run_pairing_session(
         self,

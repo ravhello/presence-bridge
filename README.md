@@ -68,9 +68,10 @@ panel. Room selection uses the observer with the strongest fresh signal.
 5. Keep the app open near the observer; accept Pair only if iOS asks. The Dell
    connects and accepts automatically.
 
-The invitation expires after three minutes and can be used only for its active
-session. See [Pairing protocol](docs/protocol.md) for the wire format and threat
-model.
+The invitation is valid for ten minutes to scan. A scan completed in time starts
+a separate five-minute attempt on the iPhone. Once the selected receiver verifies
+that exact session, the invitation is consumed and cannot be reused. See
+[Pairing protocol](docs/protocol.md) for the wire format and threat model.
 
 ## Privacy
 

@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from observer import (
+    APP_PAIRING_TRANSPORT,
     BlePresenceObserver,
     ObserverConfig,
     encrypt_pairing_result,
@@ -20,6 +21,9 @@ from observer import (
 
 
 class BlePresenceObserverTest(unittest.TestCase):
+    def test_app_pairing_uses_iphone_as_the_peripheral(self) -> None:
+        self.assertEqual(APP_PAIRING_TRANSPORT, "iphone_peripheral")
+
     def test_normalize_address(self) -> None:
         self.assertEqual(
             normalize_address("b0:81:84:ed:b2:56"),
@@ -84,7 +88,9 @@ class BlePresenceObserverTest(unittest.TestCase):
 class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         with patch("observer.MqttPublisher", return_value=Mock()):
-            self.observer = BlePresenceObserver(SimpleNamespace())
+            self.observer = BlePresenceObserver(
+                SimpleNamespace(observer_id="dell_cucina")
+            )
 
     async def test_pairing_waits_until_scanner_is_stopped(self) -> None:
         self.observer._scanner_stopped.clear()
@@ -137,6 +143,38 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
                 self.observer._active_pairing_task.cancel()
                 with self.assertRaises(asyncio.CancelledError):
                     await self.observer._active_pairing_task
+
+    async def test_pairing_heartbeat_keeps_receiver_online(self) -> None:
+        progress = {
+            "state": "waiting_for_app",
+            "message": "Waiting",
+            "extra": {"detail_code": "waiting_for_iphone_advertisement"},
+        }
+        self.observer.stop_event.set()
+
+        await self.observer._pairing_heartbeat_loop(
+            "abcdefghijklmnop",
+            progress,
+        )
+
+        self.observer.mqtt.publish_bridge_json.assert_not_called()
+
+        self.observer.stop_event.clear()
+        self.observer._sleep_or_stop = Mock(
+            side_effect=lambda _delay: self._stop_after_heartbeat()
+        )
+        await self.observer._pairing_heartbeat_loop(
+            "abcdefghijklmnop",
+            progress,
+        )
+        self.observer.mqtt.publish_bridge_json.assert_any_call(
+            "status",
+            self.observer.mqtt.status_payload(online=True),
+        )
+        self.observer.mqtt.publish.assert_any_call("availability", "online")
+
+    async def _stop_after_heartbeat(self) -> None:
+        self.observer.stop_event.set()
 
 
 if __name__ == "__main__":

@@ -37,8 +37,10 @@ The app reports the stage that failed:
 - `PP-SERVICE-01`: the Windows pairing service was incomplete.
 
 Opening the HA panel or local QR helper in more than one tab does not create a
-second invitation. Every tab receives the same active code until it expires;
-only **New code** explicitly replaces it.
+second invitation. Every tab receives the same active code during its ten-minute
+start window; only **New code** explicitly replaces it. Once the receiver verifies
+the exact session, the QR is consumed and the active attempt gets a separate
+five-minute completion window.
 
 ## iOS asks to pair but HA reports no identity
 

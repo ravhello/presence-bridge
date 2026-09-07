@@ -11,6 +11,8 @@ param(
     [string]$MqttUsername,
     [string]$InstallRoot = "$env:ProgramData\PresenceBridge",
     [string]$TaskName = "Presence Bridge",
+    [string]$PairingTaskName = "Presence Bridge - Interactive Pairing Client",
+    [string]$PairingTaskUser,
     [string]$LegacyGattTaskName = "Presence Bridge - GATT Host"
 )
 
@@ -38,6 +40,14 @@ if ($ObserverId -notmatch '^[a-z0-9_]{3,64}$') {
 $ObserverName = Read-RequiredValue $ObserverName 'Observer display name'
 $MqttHost = Read-RequiredValue $MqttHost 'MQTT host or IP'
 $MqttUsername = Read-RequiredValue $MqttUsername 'MQTT username'
+$PairingTaskUser = if ([string]::IsNullOrWhiteSpace($PairingTaskUser)) {
+    (Get-CimInstance Win32_ComputerSystem).UserName
+} else {
+    $PairingTaskUser.Trim()
+}
+if ([string]::IsNullOrWhiteSpace($PairingTaskUser)) {
+    throw 'A Windows user must be logged in while Presence Bridge is installed.'
+}
 $mqttPassword = ConvertTo-PlainText (Read-Host 'MQTT password' -AsSecureString)
 
 $python = Get-Command py.exe -ErrorAction SilentlyContinue
@@ -77,6 +87,8 @@ Get-AppxPackage -Name 'PresenceBridgeGattHost' -ErrorAction SilentlyContinue |
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $files = @(
     'adapter_info.py',
+    'interactive_pairing_helper.py',
+    'gatt_server.py',
     'observer.py',
     'protocol.py',
     'reverse_gatt_client.py',
@@ -115,6 +127,9 @@ $config = [ordered]@{
     scanner_stale_timeout = 120
     max_observations = 100
     app_pairing_enabled = $true
+    interactive_pairing_task = $PairingTaskName
+    interactive_pairing_command_path = (Join-Path $InstallRoot 'interactive-pairing-command.json')
+    interactive_pairing_result_path = (Join-Path $InstallRoot 'interactive-pairing-result.json')
     log_path = (Join-Path $InstallRoot 'presence-bridge.log')
 }
 $configPath = Join-Path $InstallRoot 'config.json'
@@ -127,7 +142,14 @@ $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInh
 $propagation = [Security.AccessControl.PropagationFlags]::None
 $acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM', 'FullControl', $inherit, $propagation, 'Allow')))
 $acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('BUILTIN\Administrators', 'FullControl', $inherit, $propagation, 'Allow')))
+$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($PairingTaskUser, 'Modify', $inherit, $propagation, 'Allow')))
 Set-Acl -LiteralPath $InstallRoot -AclObject $acl
+
+$pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $InstallRoot 'interactive-pairing-command.json'), (Join-Path $InstallRoot 'interactive-pairing-result.json'), (Join-Path $InstallRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
+$pairingSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 12) -MultipleInstances IgnoreNew
+$pairingPrincipal = New-ScheduledTaskPrincipal -UserId $PairingTaskUser -LogonType Interactive -RunLevel Highest
+$pairingTask = New-ScheduledTask -Action $pairingAction -Settings $pairingSettings -Principal $pairingPrincipal -Description 'Short-lived Presence Pair GATT client in the logged-in Windows Bluetooth session.'
+Register-ScheduledTask -TaskName $PairingTaskName -InputObject $pairingTask -Force | Out-Null
 
 $action = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --config "{1}"' -f (Join-Path $InstallRoot 'observer.py'), $configPath) -WorkingDirectory $InstallRoot
 $trigger = New-ScheduledTaskTrigger -AtStartup

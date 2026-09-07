@@ -12,5 +12,8 @@
   "scanner_restart_interval": 1800,
   "scanner_stale_timeout": 120,
   "max_observations": 100,
-  "app_pairing_enabled": true
+  "app_pairing_enabled": true,
+  "interactive_pairing_task": "Presence Bridge - Interactive Pairing Client",
+  "interactive_pairing_command_path": "C:\\ProgramData\\BlePresenceObserver\\interactive-pairing-command.json",
+  "interactive_pairing_result_path": "C:\\ProgramData\\BlePresenceObserver\\interactive-pairing-result.json"
 }

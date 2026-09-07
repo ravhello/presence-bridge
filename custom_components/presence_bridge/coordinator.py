@@ -15,6 +15,7 @@ from contextlib import suppress
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import segno
 from bluetooth_data_tools import get_cipher_for_irk, resolve_private_address
@@ -44,6 +45,8 @@ from .const import (
     MAX_PAIRING_TIMEOUT,
     MIN_PAIRING_TIMEOUT,
     MIN_RSSI,
+    PAIRING_COMPLETION_TIMEOUT,
+    PAIRING_HANDOFF_TIMEOUT,
     SIGNAL_IDENTITIES_UPDATED,
     SIGNAL_STATE_UPDATED,
     STORAGE_KEY,
@@ -58,6 +61,7 @@ from .models import IdentityState, ObserverState
 from .protocol import PairingLink, b64url_encode
 
 _IRK_RE = re.compile(r"^[0-9A-F]{32}$")
+_PAIRING_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,96}$")
 _ACTIVE_PAIRING_STATES = {
     "preparing",
     "advertising",
@@ -66,6 +70,19 @@ _ACTIVE_PAIRING_STATES = {
     "bonding",
     "identity_captured",
     "verifying",
+}
+_PAIRING_HANDOFF_CODES = {
+    "iphone_advertisement_seen",
+    "iphone_connected",
+}
+_PAIRING_COMPLETION_CODES = {
+    "iphone_session_verified",
+    "iphone_bond_ready",
+    "iphone_bond_settling",
+    "iphone_bond_reconnecting",
+    "iphone_claim_received",
+    "iphone_claim_accepted",
+    "identity_captured",
 }
 _FORCED_RENEWAL_COALESCE_SECONDS = 30.0
 
@@ -93,6 +110,29 @@ def _observer_id_from_topic(topic: str) -> str:
     )
 
 
+def _pairing_deadline(session: dict[str, Any]) -> int:
+    """Return the active deadline for an invitation or claimed attempt."""
+    for key in ("completion_expires_at", "attempt_expires_at", "expires_at"):
+        try:
+            value = int(session.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def _bounded_lease_deadline(value: Any, now: int, maximum: int) -> int | None:
+    """Accept only a short receiver-issued lease near the current time."""
+    try:
+        deadline = int(value)
+    except (TypeError, ValueError):
+        return None
+    if now - 5 < deadline <= now + maximum + 30:
+        return deadline
+    return None
+
+
 class PresenceBridgeCoordinator:
     """Own observers, private identities and pairing sessions."""
 
@@ -118,6 +158,7 @@ class PresenceBridgeCoordinator:
         self._unsubscribers: list[Callable[[], None]] = []
         self._periodic_task: asyncio.Task[None] | None = None
         self._cipher_cache: dict[str, Any] = {}
+        self._orphan_pairing_cancels: set[tuple[str, str]] = set()
 
     @property
     def away_timeout(self) -> int:
@@ -182,9 +223,15 @@ class PresenceBridgeCoordinator:
         while True:
             await asyncio.sleep(15)
             session = self._pairing_session
-            if session and int(session["expires_at"]) <= int(time.time()):
+            if session and _pairing_deadline(session) <= int(time.time()):
+                if session.get("completion_expires_at"):
+                    message = "Secure pairing stopped after five minutes without completion"
+                elif session.get("attempt_expires_at"):
+                    message = "The iPhone was found, but its QR session was not verified in time"
+                else:
+                    message = "Pairing code expired before an iPhone started"
                 await self.async_cancel_pairing(publish=True)
-                self._set_pairing_state("timeout", "Pairing invitation expired")
+                self._set_pairing_state("timeout", message)
             changed = self._expire_runtime_state()
             if changed:
                 async_dispatcher_send(self.hass, SIGNAL_STATE_UPDATED)
@@ -415,7 +462,7 @@ class PresenceBridgeCoordinator:
                 current.get("person_entity_id") == person_entity_id
                 and current.get("observer_id") == selected.observer_id
             )
-            still_valid = int(current.get("expires_at") or 0) > int(time.time()) + 10
+            still_valid = _pairing_deadline(current) > int(time.time()) + 10
             started_monotonic = float(current.get("started_monotonic") or 0.0)
             recent_forced_renewal = bool(
                 force_new
@@ -453,7 +500,10 @@ class PresenceBridgeCoordinator:
             "private_key": private_key,
             "link": link,
         }
-        pairing_uri = link.to_uri()
+        pairing_uri = (
+            f"{link.to_uri()}&"
+            f"{urlencode({'oname': selected.name[:100]})}"
+        )
         qr_data_uri = await self.hass.async_add_executor_job(
             self._qr_data_uri,
             pairing_uri,
@@ -466,6 +516,9 @@ class PresenceBridgeCoordinator:
             observer_id=selected.observer_id,
             observer_name=selected.name,
             expires_at=expires_at,
+            effective_expires_at=expires_at,
+            handoff_started=False,
+            invitation_consumed=False,
             pairing_uri=pairing_uri,
             qr_data_uri=qr_data_uri,
         )
@@ -480,6 +533,8 @@ class PresenceBridgeCoordinator:
                     "observer_id": selected.observer_id,
                     "expires_at": expires_at,
                     "timeout_seconds": timeout_seconds,
+                    "handoff_timeout_seconds": PAIRING_HANDOFF_TIMEOUT,
+                    "completion_timeout_seconds": PAIRING_COMPLETION_TIMEOUT,
                     "app_secret": b64url_encode(app_secret),
                     "public_key": base64.b64encode(public_der).decode("ascii"),
                     "gatt": {
@@ -558,35 +613,141 @@ class PresenceBridgeCoordinator:
     @callback
     def _pairing_status_message(self, message: Any) -> None:
         payload = self._decode_payload(message)
+        if not isinstance(payload, dict):
+            return
+        state = str(payload.get("state") or "").lower()
         session = self._pairing_session
-        if not isinstance(payload, dict) or not session:
+        if not session:
+            observer_id = str(payload.get("observer_id") or "").strip().lower()
+            session_id = str(payload.get("session_id") or "").strip()
+            topic_observer_id = _observer_id_from_topic(message.topic)
+            orphan = (observer_id, session_id)
+            if (
+                state in _ACTIVE_PAIRING_STATES
+                and observer_id == topic_observer_id
+                and _PAIRING_SESSION_ID_RE.fullmatch(session_id)
+                and orphan not in self._orphan_pairing_cancels
+            ):
+                self._orphan_pairing_cancels.add(orphan)
+                self.hass.async_create_task(
+                    self._async_cancel_orphaned_pairing(observer_id, session_id),
+                    f"{DOMAIN}_cancel_orphaned_pairing",
+                )
             return
         if (
             payload.get("session_id") != session["session_id"]
             or payload.get("observer_id") != session["observer_id"]
         ):
             return
-        state = str(payload.get("state") or "").lower()
+        observer = self.observers.get(session["observer_id"])
+        if observer is not None:
+            # A pairing status packet is also a live heartbeat. The normal BLE
+            # observation stream is paused while Windows owns the adapter for
+            # GATT, so it must not make the receiver appear offline in the UI.
+            observer.online = True
+            observer.last_seen = _utcnow()
         allowed = _ACTIVE_PAIRING_STATES | {"cancelled", "timeout", "error"}
         if state not in allowed:
             return
+        detail_code = str(payload.get("detail_code") or "")[:120]
+        now = int(time.time())
+        status_extra: dict[str, Any] = {
+            key: str(payload[key])[:120]
+            for key in (
+                "detail_code",
+                "advertisement_status",
+                "advertisement_error",
+                "gatt_host",
+                "transport",
+            )
+            if payload.get(key) is not None
+        }
+
+        attempt_expires_at = _bounded_lease_deadline(
+            payload.get("attempt_expires_at"),
+            now,
+            PAIRING_HANDOFF_TIMEOUT,
+        )
+        if (
+            attempt_expires_at is None
+            and detail_code in _PAIRING_HANDOFF_CODES
+            and not session.get("attempt_expires_at")
+            and not session.get("completion_expires_at")
+        ):
+            attempt_expires_at = now + PAIRING_HANDOFF_TIMEOUT
+        if attempt_expires_at is not None and not session.get("completion_expires_at"):
+            session["attempt_expires_at"] = attempt_expires_at
+            status_extra["attempt_expires_at"] = attempt_expires_at
+            status_extra["handoff_started"] = True
+
+        completion_expires_at = _bounded_lease_deadline(
+            payload.get("completion_expires_at"),
+            now,
+            PAIRING_COMPLETION_TIMEOUT,
+        )
+        if (
+            completion_expires_at is None
+            and detail_code in _PAIRING_COMPLETION_CODES
+            and not session.get("completion_expires_at")
+        ):
+            completion_expires_at = now + PAIRING_COMPLETION_TIMEOUT
+        if completion_expires_at is not None:
+            session["completion_expires_at"] = completion_expires_at
+            status_extra.update(
+                {
+                    "completion_expires_at": completion_expires_at,
+                    "effective_expires_at": completion_expires_at,
+                    "invitation_consumed": True,
+                    "pairing_uri": None,
+                    "qr_data_uri": None,
+                }
+            )
+        elif session.get("completion_expires_at"):
+            status_extra.update(
+                {
+                    "completion_expires_at": session["completion_expires_at"],
+                    "effective_expires_at": session["completion_expires_at"],
+                    "invitation_consumed": True,
+                    "pairing_uri": None,
+                    "qr_data_uri": None,
+                }
+            )
+        elif session.get("attempt_expires_at"):
+            status_extra.update(
+                {
+                    "attempt_expires_at": session["attempt_expires_at"],
+                    "effective_expires_at": session["attempt_expires_at"],
+                    "handoff_started": True,
+                }
+            )
         self._set_pairing_state(
             state,
             str(payload.get("message") or "Pairing update")[:240],
-            **{
-                key: str(payload[key])[:120]
-                for key in (
-                    "detail_code",
-                    "advertisement_status",
-                    "advertisement_error",
-                    "gatt_host",
-                    "transport",
-                )
-                if payload.get(key) is not None
-            },
+            **status_extra,
         )
         if state in {"cancelled", "timeout", "error"}:
             self._pairing_session = None
+
+    async def _async_cancel_orphaned_pairing(
+        self,
+        observer_id: str,
+        session_id: str,
+    ) -> None:
+        """Stop a receiver session whose HA private key was lost on restart."""
+        await mqtt.async_publish(
+            self.hass,
+            f"{TOPIC_ROOT}/{observer_id}/pairing/command",
+            json.dumps(
+                {
+                    "schema": 2,
+                    "action": "cancel",
+                    "session_id": session_id,
+                },
+                separators=(",", ":"),
+            ),
+            qos=1,
+            retain=False,
+        )
 
     @callback
     def _pairing_result_message(self, message: Any) -> None:
@@ -701,7 +862,17 @@ class PresenceBridgeCoordinator:
                 {
                     key: value
                     for key, value in self.pairing_public.items()
-                    if key in {"expires_at", "pairing_uri", "qr_data_uri"}
+                    if key
+                    in {
+                        "expires_at",
+                        "attempt_expires_at",
+                        "completion_expires_at",
+                        "effective_expires_at",
+                        "handoff_started",
+                        "invitation_consumed",
+                        "pairing_uri",
+                        "qr_data_uri",
+                    }
                 }
             )
         self.pairing_public = {

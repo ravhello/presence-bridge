@@ -139,9 +139,10 @@ def verify_claim(
     supplied_proof: str,
     *,
     now: int | None = None,
+    allow_expired: bool = False,
 ) -> bool:
     """Verify an app claim in constant time."""
-    link.validate(now=now)
+    link.validate(now=now, allow_expired=allow_expired)
     return hmac.compare_digest(claim_proof(link), str(supplied_proof or ""))
 
 

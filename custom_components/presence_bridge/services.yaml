@@ -16,7 +16,7 @@ start_pairing:
     timeout_seconds:
       name: Timeout
       required: false
-      default: 180
+      default: 600
       selector:
         number:
           min: 60

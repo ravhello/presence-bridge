@@ -88,8 +88,10 @@ and diagnostics.
 
 - An attacker who only sees Bluetooth traffic cannot forge either HMAC or read
   the encrypted claim.
-- A QR screenshot is sensitive until it expires. Cancel the session if the code
-  is exposed.
+- A QR screenshot is sensitive during its ten-minute scan window. Cancel the
+  session if the code is exposed. Scanning in time gives the iPhone one bounded
+  five-minute attempt; once the exact session is verified, the QR is consumed
+  and cannot start another attempt.
 - A different Presence Pair session is rejected before Windows attempts a bond.
 - The MQTT broker is trusted local infrastructure. Use a dedicated account,
   topic ACLs, and TLS across untrusted network segments.
