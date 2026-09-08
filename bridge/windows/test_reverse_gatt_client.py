@@ -95,7 +95,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def test_matches_presence_pair_name_when_ios_omits_uuid(self) -> None:
+    def test_rejects_presence_pair_name_without_matching_uuid(self) -> None:
         client = ReverseGattPairingClient(
             service_uuid="service",
             session_uuid="session",
@@ -108,7 +108,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             local_name="Presence Pair",
         )
 
-        self.assertTrue(
+        self.assertFalse(
             client._matches_advertisement(
                 SimpleNamespace(name=None),
                 advertisement,
@@ -125,7 +125,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def test_matches_truncated_ios_scan_response_name(self) -> None:
+    def test_rejects_truncated_ios_name_without_matching_uuid(self) -> None:
         client = ReverseGattPairingClient(
             service_uuid="service",
             session_uuid="session",
@@ -133,7 +133,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             result_uuid="result",
         )
 
-        self.assertTrue(
+        self.assertFalse(
             client._matches_advertisement(
                 SimpleNamespace(name=None),
                 SimpleNamespace(
@@ -403,7 +403,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(backend._retry_on_services_changed)
         bleak_client.connect.assert_awaited_once()
 
-    async def test_open_candidate_fallbacks_never_pair_before_qr_verification(
+    async def test_open_candidate_fallbacks_do_not_pair_before_qr_verification(
         self,
     ) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
@@ -479,6 +479,8 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connect.await_count, 2)
         self.assertFalse(connect.await_args_list[1].kwargs["use_cached_services"])
         self.assertFalse(connect.await_args_list[1].kwargs["filter_services"])
+        self.assertFalse(connect.await_args_list[0].kwargs["pair_before_discovery"])
+        self.assertFalse(connect.await_args_list[1].kwargs["pair_before_discovery"])
         empty_native.disconnect.assert_awaited_once()
 
     async def test_timeout_clears_one_matching_bond_before_retry(self) -> None:
@@ -765,7 +767,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actual, result)
         self.assertTrue(pair_candidate.await_args_list[0].kwargs["allow_bond_reset"])
         self.assertTrue(pair_candidate.await_args_list[1].kwargs["allow_bond_reset"])
-        self.assertNotIn("attempt_expires_at", client.lease_payload)
+        self.assertIn("attempt_expires_at", client.lease_payload)
 
     async def test_same_private_address_resets_at_most_once(self) -> None:
         link = PairingLink(
@@ -824,8 +826,8 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             client._start_handoff_lease()
             client._start_completion_lease()
 
-        self.assertEqual(client.lease_payload["attempt_expires_at"], 1_090)
-        self.assertEqual(client.lease_payload["completion_expires_at"], 1_300)
+        self.assertEqual(client.lease_payload["attempt_expires_at"], 2_800)
+        self.assertEqual(client.lease_payload["completion_expires_at"], 2_800)
 
 
 if __name__ == "__main__":

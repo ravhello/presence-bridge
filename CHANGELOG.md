@@ -6,7 +6,7 @@ All notable changes to Presence Bridge are documented here.
 
 - Keep a QR code valid for ten minutes only as an invitation to start pairing.
   Once the matching iPhone session is read, consume the invitation and grant a
-  separate five-minute window so its original expiry cannot interrupt the bond.
+  separate thirty-minute window so its original expiry cannot interrupt the bond.
 - Show separate start, handoff, and completion countdowns in Home Assistant,
   and remove the QR as soon as the authenticated session takes ownership.
 

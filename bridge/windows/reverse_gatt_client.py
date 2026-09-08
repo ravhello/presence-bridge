@@ -35,8 +35,8 @@ else:
 
 ProgressCallback = Callable[[str, str], None]
 LOGGER = logging.getLogger("presence_bridge.gatt")
-PAIRING_HANDOFF_GRACE_SECONDS = 90.0
-PAIRING_COMPLETION_GRACE_SECONDS = 300.0
+PAIRING_HANDOFF_GRACE_SECONDS = 1_800.0
+PAIRING_COMPLETION_GRACE_SECONDS = 1_800.0
 PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS = (
     PAIRING_HANDOFF_GRACE_SECONDS + PAIRING_COMPLETION_GRACE_SECONDS + 15.0
 )
@@ -145,21 +145,12 @@ class ReverseGattPairingClient:
             str(value).lower()
             for value in (getattr(advertisement, "service_data", None) or {})
         )
-        advertised_name = str(
-            getattr(advertisement, "local_name", None)
-            or getattr(device, "name", None)
-            or ""
-        ).strip().casefold()
-        # iOS has only 10 bytes of scan-response space for the local name when
-        # the 128-bit service UUID consumes the primary advertisement. WinRT
-        # can therefore receive "Presence Pair" as the truncated "Presence".
-        # The one-time session and HMAC are still verified before accepting it.
         matching_services = self.service_uuids.intersection(services)
-        matched = (
-            bool(matching_services)
-            or advertised_name in {"presence pair", "presencepair"}
-            or advertised_name.startswith("presence")
-        )
+        # A name-only match is unsafe and unreliable once services rotate per
+        # QR session: Windows may retain an earlier "Presence Pair" advert and
+        # connect to the wrong GATT database. Modern and legacy clients both
+        # advertise an explicit service UUID, so only that UUID selects a peer.
+        matched = bool(matching_services)
         if matched:
             self._matched_advertisement = advertisement
             self._matched_service_uuid = next(iter(matching_services), None)
@@ -739,6 +730,9 @@ class ReverseGattPairingClient:
                 continue
             if device is None:
                 continue
+            # Once the receiver has seen the exact one-time service UUID, QR
+            # expiry must not interrupt an in-flight local BLE connection.
+            self._start_handoff_lease()
             self._log_detected_candidate(device)
             device_address = str(getattr(device, "address", "") or "").casefold()
             attempt_deadline = (
@@ -793,7 +787,7 @@ class ReverseGattPairingClient:
         if self._completion_deadline is not None:
             message = (
                 "The QR was accepted in time, but secure pairing did not finish "
-                "within the five-minute completion window"
+                "within the thirty-minute completion window"
             )
         elif self._handoff_deadline is not None:
             message = (

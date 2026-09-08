@@ -43,7 +43,7 @@ presencepair://pair?v=2&sid=<session>&oid=<observer>&exp=<unix>&secret=<base64ur
 The invitation is valid for at most ten minutes. The app advertises only while
 that invitation is active and visible on screen. Seeing a generic Presence Pair
 advertisement does not consume or shorten another invitation; the separate
-five-minute completion window starts only after the exact session is read and
+thirty-minute completion window starts only after the exact session is read and
 verified.
 
 ## Claim and acknowledgement
@@ -102,7 +102,7 @@ and diagnostics.
   recover the QR secret from a claim.
 - A QR screenshot is sensitive during its ten-minute scan window. Cancel the
   session if the code is exposed. Scanning in time gives the iPhone one bounded
-  five-minute attempt; once the exact session is verified, the QR is consumed
+  thirty-minute attempt; once the exact session is verified, the QR is consumed
   and cannot start another attempt.
 - A different Presence Pair session is rejected before Windows attempts a bond.
 - The MQTT broker is trusted local infrastructure. Use a dedicated account,

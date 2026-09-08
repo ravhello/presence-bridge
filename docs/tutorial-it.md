@@ -57,7 +57,7 @@ ha trovato l'iPhone o ha aperto la connessione; **Nuovo codice** riavvia l'inter
 tentativo senza passaggi manuali sul PC.
 
 Il codice e valido per dieci minuti per essere scansionato. Una scansione
-eseguita in tempo avvia sull'iPhone un tentativo separato di cinque minuti, che
+eseguita in tempo avvia sull'iPhone un tentativo separato di trenta minuti, che
 non viene interrotto dalla scadenza originaria. Appena il ricevitore verifica
 quella precisa sessione, il QR viene consumato e non puo piu essere riutilizzato.
 Non contiene password permanenti e, dopo l'associazione, l'app non deve restare

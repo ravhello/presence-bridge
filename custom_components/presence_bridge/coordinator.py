@@ -199,7 +199,7 @@ class PresenceBridgeCoordinator:
             self._unsubscribers.append(
                 await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
             )
-        self._periodic_task = self.hass.async_create_task(
+        self._periodic_task = self.hass.async_create_background_task(
             self._async_periodic_refresh(),
             f"{DOMAIN}_periodic_refresh",
         )
@@ -222,7 +222,7 @@ class PresenceBridgeCoordinator:
             session = self._pairing_session
             if session and _pairing_deadline(session) <= int(time.time()):
                 if session.get("completion_expires_at"):
-                    message = "Secure pairing stopped after five minutes without completion"
+                    message = "Secure pairing stopped after thirty minutes without completion"
                 elif session.get("attempt_expires_at"):
                     message = "The iPhone was found, but its QR session was not verified in time"
                 else:
