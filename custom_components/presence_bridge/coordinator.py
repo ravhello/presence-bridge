@@ -71,10 +71,6 @@ _ACTIVE_PAIRING_STATES = {
     "identity_captured",
     "verifying",
 }
-_PAIRING_HANDOFF_CODES = {
-    "iphone_advertisement_seen",
-    "iphone_connected",
-}
 _PAIRING_COMPLETION_CODES = {
     "iphone_session_verified",
     "iphone_bond_ready",
@@ -82,6 +78,7 @@ _PAIRING_COMPLETION_CODES = {
     "iphone_bond_reconnecting",
     "iphone_claim_received",
     "iphone_claim_accepted",
+    "iphone_ack_deferred",
     "identity_captured",
 }
 _FORCED_RENEWAL_COALESCE_SECONDS = 30.0
@@ -668,13 +665,6 @@ class PresenceBridgeCoordinator:
             now,
             PAIRING_HANDOFF_TIMEOUT,
         )
-        if (
-            attempt_expires_at is None
-            and detail_code in _PAIRING_HANDOFF_CODES
-            and not session.get("attempt_expires_at")
-            and not session.get("completion_expires_at")
-        ):
-            attempt_expires_at = now + PAIRING_HANDOFF_TIMEOUT
         if attempt_expires_at is not None and not session.get("completion_expires_at"):
             session["attempt_expires_at"] = attempt_expires_at
             status_extra["attempt_expires_at"] = attempt_expires_at

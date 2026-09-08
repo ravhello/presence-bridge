@@ -222,7 +222,7 @@ class PresenceBridgePanel extends HTMLElement {
         body: this.text("The Dell is completing the encrypted connection automatically. Keep Presence Pair open and tap Pair only if iOS asks.", "Il Dell sta completando automaticamente la connessione cifrata. Tieni Presence Pair aperta e tocca Abbina solo se lo chiede iOS."),
       };
     }
-    if (pairing.state === "bonding" || pairing.detail_code === "iphone_claim_accepted") {
+    if (pairing.state === "bonding" || ["iphone_claim_accepted", "iphone_ack_deferred"].includes(pairing.detail_code)) {
       return {
         tone: "",
         title: this.text("iPhone connected", "iPhone connesso"),

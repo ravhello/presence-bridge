@@ -17,6 +17,7 @@ from protocol import (
     ProtocolError,
     acceptance_proof,
     claim_proof,
+    pairing_service_uuid,
     verify_claim,
 )
 
@@ -40,6 +41,18 @@ def test_claim_vector() -> None:
     assert claim_proof(LINK) == "-q6gU_keDbd_kcgOXTfnolM0m3ke96HzM_b-z1uuXPk"
     assert verify_claim(LINK, claim_proof(LINK), now=NOW)
     assert not verify_claim(LINK, "A" * 43, now=NOW)
+
+
+def test_pairing_service_uuid_is_stable_and_session_specific() -> None:
+    """Each QR gets a stable UUID that cannot collide with a later session."""
+    assert pairing_service_uuid(LINK) == "309ec3dc-56a2-50ee-a855-46fa02c21c3d"
+    other = PairingLink(
+        session_id="different_session_1234",
+        observer_id=LINK.observer_id,
+        expires_at=LINK.expires_at,
+        secret=LINK.secret,
+    )
+    assert pairing_service_uuid(other) != pairing_service_uuid(LINK)
 
 
 def test_acceptance_vector() -> None:

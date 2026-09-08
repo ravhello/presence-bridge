@@ -19,7 +19,19 @@ from bleak.exc import (
     BleakError,
     BleakGATTProtocolError,
 )
-from protocol import PairingLink, acceptance_proof, verify_claim
+from protocol import (
+    PairingLink,
+    acceptance_proof,
+    pairing_service_uuid,
+    verify_claim,
+)
+
+if sys.platform == "win32":
+    from winrt.windows.devices.enumeration import (
+        DeviceInformation as WinRTDeviceInformation,
+    )
+else:
+    WinRTDeviceInformation = None
 
 ProgressCallback = Callable[[str, str], None]
 LOGGER = logging.getLogger("presence_bridge.gatt")
@@ -80,13 +92,14 @@ class ReverseGattPairingClient:
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.service_uuid = service_uuid.lower()
+        self.service_uuids = {self.service_uuid}
+        self._matched_service_uuid: str | None = None
         self.session_uuid = session_uuid.lower()
         self.claim_uuid = claim_uuid.lower()
         self.result_uuid = result_uuid.lower()
         self.progress_callback = progress_callback
         self.detail_code = "waiting_for_iphone_advertisement"
         self._matched_advertisement: Any | None = None
-        self._newly_bonded_addresses: set[str] = set()
         self._handoff_deadline: float | None = None
         self._handoff_expires_at: int | None = None
         self._completion_deadline: float | None = None
@@ -141,13 +154,15 @@ class ReverseGattPairingClient:
         # the 128-bit service UUID consumes the primary advertisement. WinRT
         # can therefore receive "Presence Pair" as the truncated "Presence".
         # The one-time session and HMAC are still verified before accepting it.
+        matching_services = self.service_uuids.intersection(services)
         matched = (
-            self.service_uuid in services
+            bool(matching_services)
             or advertised_name in {"presence pair", "presencepair"}
             or advertised_name.startswith("presence")
         )
         if matched:
             self._matched_advertisement = advertisement
+            self._matched_service_uuid = next(iter(matching_services), None)
         return matched
 
     @staticmethod
@@ -247,7 +262,9 @@ class ReverseGattPairingClient:
             "pair": pair_before_discovery,
         }
         if filter_services:
-            kwargs["services"] = [self.service_uuid]
+            kwargs["services"] = [
+                self._matched_service_uuid or self.service_uuid
+            ]
         client = BleakClient(device, **kwargs)
         self._enable_winrt_service_change_retry(client)
         try:
@@ -274,6 +291,27 @@ class ReverseGattPairingClient:
         # discovering the freshly published peripheral service. Bleak 3.0
         # contains the correct retry path but leaves it disabled by default.
         backend._retry_on_services_changed = True
+
+    @staticmethod
+    async def _windows_reports_paired(client: BleakClient) -> bool:
+        """Confirm a bond that WinRT committed despite returning an error."""
+        if WinRTDeviceInformation is None:
+            return False
+        backend = getattr(client, "_backend", None)
+        requester = getattr(backend, "_requester", None)
+        device_information = getattr(requester, "device_information", None)
+        device_id = getattr(device_information, "id", None)
+        if not device_id:
+            return False
+        try:
+            refreshed = await WinRTDeviceInformation.create_from_id_async(device_id)
+            return bool(refreshed.pairing.is_paired)
+        except Exception as error:
+            LOGGER.debug(
+                "Unable to refresh the Windows pairing state: %s",
+                ReverseGattPairingClient._error_summary(error),
+            )
+            return False
 
     @staticmethod
     def _gatt_inventory(client: BleakClient) -> str:
@@ -310,20 +348,12 @@ class ReverseGattPairingClient:
                 14.0,
             ),
             _ConnectionStrategy(
-                "pair before filtered service discovery",
-                detected_type,
-                True,
-                None,
-                True,
-                28.0,
-            ),
-            _ConnectionStrategy(
-                "cached full service discovery after pairing",
+                "fresh full service discovery",
                 detected_type,
                 False,
-                True,
                 False,
-                14.0,
+                False,
+                18.0,
             ),
             _ConnectionStrategy(
                 "fresh filtered service discovery",
@@ -333,16 +363,24 @@ class ReverseGattPairingClient:
                 False,
                 14.0,
             ),
+            _ConnectionStrategy(
+                "cached full service discovery",
+                detected_type,
+                False,
+                True,
+                False,
+                10.0,
+            ),
         ]
         if detected_type is not None:
             strategies.append(
                 _ConnectionStrategy(
-                    "automatic-address pre-pair fallback",
+                    "automatic-address discovery fallback",
                     None,
-                    True,
-                    None,
-                    True,
-                    20.0,
+                    False,
+                    False,
+                    False,
+                    18.0,
                 )
             )
 
@@ -353,7 +391,7 @@ class ReverseGattPairingClient:
                 break
             attempt_timeout = min(strategy.timeout, max(3.0, remaining - 1.0))
             try:
-                return await self._connect_candidate(
+                connected = await self._connect_candidate(
                     device,
                     connection_timeout=attempt_timeout,
                     address_type=strategy.address_type,
@@ -361,6 +399,19 @@ class ReverseGattPairingClient:
                     use_cached_services=strategy.use_cached_services,
                     pair_before_discovery=strategy.pair_before_discovery,
                 )
+                inventory = self._gatt_inventory(connected)
+                if self.session_uuid in inventory:
+                    return connected
+                LOGGER.warning(
+                    "iPhone GATT connection opened without the Presence Pair "
+                    "session (%s): %s",
+                    strategy.label,
+                    inventory,
+                )
+                with suppress(Exception):
+                    if connected.is_connected:
+                        await asyncio.wait_for(connected.disconnect(), timeout=8)
+                raise BleakCharacteristicNotFoundError(self.session_uuid)
             except asyncio.CancelledError:
                 raise
             except BaseException as error:
@@ -407,7 +458,10 @@ class ReverseGattPairingClient:
 
         if last_error is None:
             raise TimeoutError("No time remained for a Bluetooth connection")
-        if allow_bond_reset and isinstance(last_error, TimeoutError):
+        if allow_bond_reset and isinstance(
+            last_error,
+            TimeoutError | BleakCharacteristicNotFoundError,
+        ):
             self._progress(
                 "iphone_bond_reset",
                 "Windows could not reuse the saved phone state; clearing only this Presence Pair bond before retrying",
@@ -454,110 +508,6 @@ class ReverseGattPairingClient:
         except (TypeError, ValueError):
             return False
 
-    async def _reopen_and_read_claim(
-        self,
-        device: Any,
-        link: PairingLink,
-        time_budget: float,
-    ) -> tuple[BleakClient, bytes | bytearray]:
-        """Reconnect after WinRT/iOS closes GATT while committing a new bond."""
-        deadline = time.monotonic() + min(60.0, time_budget)
-        last_error: BaseException | None = None
-        for attempt in range(3):
-            remaining = deadline - time.monotonic()
-            if remaining <= 3:
-                break
-            self._progress(
-                "iphone_bond_reconnecting",
-                "Bluetooth bond accepted; reopening the encrypted app connection",
-            )
-            bonded_client: BleakClient | None = None
-            attempt_error: BaseException | None = None
-            try:
-                bonded_client = await self._open_candidate(
-                    device,
-                    min(24.0, remaining),
-                    allow_bond_reset=False,
-                )
-                session_value = await asyncio.wait_for(
-                    bonded_client.read_gatt_char(self.session_uuid),
-                    timeout=min(10.0, remaining),
-                )
-                session = self._decode_json(session_value, "session")
-                if not self._session_matches(link, session):
-                    raise SessionMismatchError(
-                        "The iPhone changed pairing session while reconnecting",
-                        "iphone_session_mismatch",
-                    )
-                claim_value = await asyncio.wait_for(
-                    bonded_client.read_gatt_char(self.claim_uuid),
-                    timeout=min(15.0, remaining),
-                )
-                return bonded_client, claim_value
-            except asyncio.CancelledError:
-                raise
-            except SessionMismatchError:
-                raise
-            except BaseException as error:
-                last_error = error
-                attempt_error = error
-                LOGGER.warning(
-                    "Encrypted iPhone reconnect %s/3 failed: %s",
-                    attempt + 1,
-                    self._error_summary(error),
-                )
-            finally:
-                if bonded_client is not None and attempt_error is not None:
-                    with suppress(Exception):
-                        if bonded_client.is_connected:
-                            await asyncio.wait_for(
-                                bonded_client.disconnect(),
-                                timeout=8,
-                            )
-            if attempt < 2:
-                await asyncio.sleep(0.8 + attempt * 0.6)
-
-        if last_error is None:
-            raise TimeoutError("No time remained to reopen the encrypted phone link")
-        raise last_error
-
-    async def _read_claim_after_pair(
-        self,
-        client: BleakClient,
-        time_budget: float,
-    ) -> bytes | bytearray:
-        """Let WinRT finish securing the current GATT link before reconnecting."""
-        deadline = time.monotonic() + min(8.0, time_budget)
-        last_error: BaseException | None = None
-        for attempt in range(4):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not client.is_connected:
-                break
-            try:
-                return await asyncio.wait_for(
-                    client.read_gatt_char(self.claim_uuid),
-                    timeout=min(3.0, remaining),
-                )
-            except asyncio.CancelledError:
-                raise
-            except BaseException as error:
-                last_error = error
-                LOGGER.warning(
-                    "Encrypted iPhone claim on the existing connection %s/4 "
-                    "is not ready: %s",
-                    attempt + 1,
-                    self._error_summary(error),
-                )
-                if attempt < 3 and client.is_connected:
-                    self._progress(
-                        "iphone_bond_settling",
-                        "Bluetooth bond accepted; waiting for Windows to secure the current connection",
-                    )
-                    await asyncio.sleep(0.7 + attempt * 0.4)
-        if last_error is None:
-            raise ConnectionError("The Bluetooth link closed while securing the bond")
-        raise last_error
-
     async def _pair_candidate(
         self,
         device: Any,
@@ -592,10 +542,10 @@ class ReverseGattPairingClient:
                     "Presence Pair GATT session unavailable after connect: %s",
                     inventory,
                 )
-                schema_blocked = (
-                    isinstance(error, BleakCharacteristicNotFoundError)
-                    and inventory == "empty"
-                )
+                schema_blocked = isinstance(
+                    error,
+                    BleakCharacteristicNotFoundError,
+                ) and self.session_uuid not in inventory
                 if allow_bond_reset and (
                     schema_blocked or self._is_resettable_bond_error(error)
                 ):
@@ -636,41 +586,34 @@ class ReverseGattPairingClient:
                 "iphone_session_verified",
                 "QR session verified; the active pairing now has its own completion window",
             )
-            pair_succeeded = False
+            claim_value = await client.read_gatt_char(self.claim_uuid)
+            claim = self._decode_json(claim_value, "claim")
+            if not self._session_matches(link, claim) or not verify_claim(
+                link,
+                str(claim.get("proof") or ""),
+                allow_expired=True,
+            ):
+                raise ReverseGattError(
+                    "The iPhone did not prove possession of the active QR code",
+                    "iphone_claim_rejected",
+                )
+            self._progress(
+                "iphone_claim_received",
+                "Pairing code verified; waiting for the iPhone Bluetooth confirmation",
+            )
+
             try:
                 remaining = max(3.0, deadline - time.monotonic())
                 await asyncio.wait_for(client.pair(), timeout=min(30.0, remaining))
-                pair_succeeded = True
-                self._newly_bonded_addresses.add(
-                    str(getattr(device, "address", "") or "").casefold()
-                )
-                self._progress(
-                    "iphone_bond_ready",
-                    "Secure Bluetooth bond accepted; finishing the app exchange",
-                )
-                try:
-                    claim_value = await self._read_claim_after_pair(
-                        client,
-                        max(3.0, deadline - time.monotonic()),
-                    )
-                except Exception:
-                    with suppress(Exception):
-                        if client.is_connected:
-                            await asyncio.wait_for(client.disconnect(), timeout=8)
-                    await asyncio.sleep(0.8)
-                    client, claim_value = await self._reopen_and_read_claim(
-                        device,
-                        link,
-                        max(3.0, deadline - time.monotonic()),
-                    )
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                if (
-                    not pair_succeeded
-                    and allow_bond_reset
-                    and self._is_stale_secure_bond_error(error)
-                ):
+                if await self._windows_reports_paired(client):
+                    LOGGER.warning(
+                        "WinRT reported a pairing error after committing the bond: %s",
+                        self._error_summary(error),
+                    )
+                elif allow_bond_reset and self._is_stale_secure_bond_error(error):
                     self._progress(
                         "iphone_bond_reset",
                         "The encrypted phone bond remained unusable after reconnecting; Windows is replacing it once",
@@ -691,20 +634,13 @@ class ReverseGattPairingClient:
                         f"A saved phone bond blocked the secure link ({detail}); retrying",
                         "iphone_bond_reset",
                     ) from error
-                raise
-            claim = self._decode_json(
-                claim_value,
-                "claim",
+                else:
+                    raise
+
+            self._progress(
+                "iphone_bond_ready",
+                "Secure Bluetooth bond accepted; finishing locally in Home Assistant",
             )
-            if not self._session_matches(link, claim) or not verify_claim(
-                link,
-                str(claim.get("proof") or ""),
-                allow_expired=True,
-            ):
-                raise ReverseGattError(
-                    "The iPhone did not prove possession of the active QR code",
-                    "iphone_claim_rejected",
-                )
 
             acknowledgement = json.dumps(
                 {
@@ -718,15 +654,32 @@ class ReverseGattPairingClient:
                 separators=(",", ":"),
                 sort_keys=True,
             ).encode("utf-8")
-            await client.write_gatt_char(
-                self.result_uuid,
-                acknowledgement,
-                response=True,
-            )
-            self._progress(
-                "iphone_claim_accepted",
-                "Encrypted app claim accepted; capturing the private identity",
-            )
+            try:
+                await client.write_gatt_char(
+                    self.result_uuid,
+                    acknowledgement,
+                    response=True,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                # Some WinRT/iOS combinations close the dynamic GATT service
+                # immediately after committing the bond. The HMAC claim and
+                # Windows bond are already complete, so HA can safely finish
+                # by reading the new IRK without forcing a second prompt.
+                LOGGER.warning(
+                    "The iPhone acknowledgement channel closed after a successful bond: %s",
+                    self._error_summary(error),
+                )
+                self._progress(
+                    "iphone_ack_deferred",
+                    "Bluetooth bond accepted; Home Assistant is completing the identity locally",
+                )
+            else:
+                self._progress(
+                    "iphone_claim_accepted",
+                    "Encrypted app claim accepted; capturing the private identity",
+                )
             return ReverseGattResult(
                 address=str(getattr(device, "address", "") or ""),
                 name=str(getattr(device, "name", "") or "Presence Pair iPhone"),
@@ -741,8 +694,13 @@ class ReverseGattPairingClient:
         link: PairingLink,
         timeout_seconds: int,
     ) -> ReverseGattResult:
-        """Wait for the matching iPhone, bond, and verify its encrypted claim."""
+        """Wait for the matching iPhone, verify its claim, and create a bond."""
         link.validate()
+        self.service_uuids = {
+            self.service_uuid,
+            pairing_service_uuid(link),
+        }
+        self._matched_service_uuid = None
         self._handoff_deadline = None
         self._handoff_expires_at = None
         self._completion_deadline = None
@@ -781,9 +739,13 @@ class ReverseGattPairingClient:
                 continue
             if device is None:
                 continue
-            self._start_handoff_lease()
             self._log_detected_candidate(device)
             device_address = str(getattr(device, "address", "") or "").casefold()
+            attempt_deadline = (
+                self._completion_deadline
+                or self._handoff_deadline
+                or invitation_deadline
+            )
             try:
                 return await asyncio.wait_for(
                     self._pair_candidate(
@@ -791,12 +753,10 @@ class ReverseGattPairingClient:
                         link,
                         max(
                             3.0,
-                            (self._completion_deadline or self._handoff_deadline)
-                            - time.monotonic(),
+                            attempt_deadline - time.monotonic(),
                         ),
                         allow_bond_reset=(
                             device_address not in reset_bond_addresses
-                            and device_address not in self._newly_bonded_addresses
                         ),
                     ),
                     timeout=PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS,

@@ -37,7 +37,6 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from protocol import PairingLink, ProtocolError, b64url_decode
 from reverse_gatt_client import (
     PAIRING_COMPLETION_GRACE_SECONDS,
-    PAIRING_HANDOFF_GRACE_SECONDS,
     ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
@@ -785,6 +784,7 @@ class BlePresenceObserver:
             progress_states = {
                 "waiting_for_iphone_advertisement": "waiting_for_app",
                 "iphone_advertisement_seen": "connecting",
+                "iphone_candidate_unverified": "connecting",
                 "iphone_connected": "verifying",
                 "iphone_session_verified": "bonding",
                 "iphone_bond_ready": "bonding",
@@ -792,6 +792,7 @@ class BlePresenceObserver:
                 "iphone_claim_received": "bonding",
                 "iphone_claim_rejected": "waiting_for_app",
                 "iphone_claim_accepted": "bonding",
+                "iphone_ack_deferred": "bonding",
                 "iphone_session_mismatch": "waiting_for_app",
                 "iphone_connection_failed": "connecting",
                 "iphone_connection_retry": "connecting",
@@ -808,16 +809,22 @@ class BlePresenceObserver:
                 lease = dict(reported_lease)
                 if client is not None:
                     lease.update(client.lease_payload)
+                public_detail_code = (
+                    "iphone_candidate_unverified"
+                    if detail_code
+                    in {"iphone_advertisement_seen", "iphone_connected"}
+                    else detail_code
+                )
                 progress.update(
                     {
                         "state": progress_states.get(
-                            detail_code,
+                            public_detail_code,
                             "waiting_for_app",
                         ),
                         "message": message,
                         "extra": {
                             "expires_at": link.expires_at,
-                            "detail_code": detail_code,
+                            "detail_code": public_detail_code,
                             "transport": pairing_transport,
                             **lease,
                         },
@@ -1002,7 +1009,6 @@ class BlePresenceObserver:
             time.monotonic() + max(1, link.expires_at - int(time.time())),
         )
         last_update: tuple[str, str] | None = None
-        handoff_started = False
         completion_started = False
         try:
             while True:
@@ -1041,19 +1047,7 @@ class BlePresenceObserver:
                         reported_lease["completion_expires_at"] = completion_expires_at
                     elif attempt_expires_at > now_epoch and not completion_started:
                         deadline = now_monotonic + attempt_expires_at - now_epoch
-                        handoff_started = True
                         reported_lease["attempt_expires_at"] = attempt_expires_at
-                    elif (
-                        detail_code
-                        in {"iphone_advertisement_seen", "iphone_connected"}
-                        and not handoff_started
-                        and not completion_started
-                    ):
-                        deadline = now_monotonic + PAIRING_HANDOFF_GRACE_SECONDS
-                        handoff_started = True
-                        reported_lease["attempt_expires_at"] = int(
-                            time.time() + PAIRING_HANDOFF_GRACE_SECONDS
-                        )
                     elif (
                         detail_code
                         in {
@@ -1063,6 +1057,7 @@ class BlePresenceObserver:
                             "iphone_bond_reconnecting",
                             "iphone_claim_received",
                             "iphone_claim_accepted",
+                            "iphone_ack_deferred",
                         }
                         and not completion_started
                     ):

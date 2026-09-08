@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -121,6 +122,18 @@ def claim_message(
         f"presence-bridge:v{PROTOCOL_VERSION}\n"
         f"{session_id}\n{observer_id}\n{int(expires_at)}"
     ).encode("ascii")
+
+
+def pairing_service_uuid(link: PairingLink) -> str:
+    """Derive a session-specific GATT service UUID from the QR secret."""
+    link.validate(allow_expired=True)
+    message = (
+        f"presence-bridge-gatt:v{link.version}\n{link.session_id}"
+    ).encode("ascii")
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
 
 
 def claim_proof(link: PairingLink) -> str:
