@@ -20,6 +20,8 @@ from reverse_gatt_client import ReverseGattPairingClient, ReverseGattResult
 
 LOGGER = logging.getLogger("presence_bridge.interactive_pairing")
 PREFLIGHT_READY_UUID = "b6201f73-89f1-4c2b-981f-7ccade5a52d4"
+PROXIMITY_PROVIDER_START_ATTEMPTS = 5
+PROXIMITY_PROVIDER_RETRY_SECONDS = 2.0
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -64,6 +66,46 @@ def _status(
     }
     _write_json(path, payload)
     LOGGER.info("%s: %s", detail_code, message)
+
+
+async def _start_proximity_server(
+    link: PairingLink,
+    result_path: Path,
+) -> GattProximityServer:
+    """Start a fresh WinRT provider, tolerating delayed adapter release."""
+    last_error: Exception | None = None
+    for attempt in range(1, PROXIMITY_PROVIDER_START_ATTEMPTS + 1):
+        server = GattProximityServer(ready_uuid=PREFLIGHT_READY_UUID)
+        try:
+            await server.async_start(link)
+            return server
+        except asyncio.CancelledError:
+            await server.async_stop()
+            raise
+        except Exception as error:
+            last_error = error
+            await server.async_stop()
+            if attempt >= PROXIMITY_PROVIDER_START_ATTEMPTS:
+                raise
+            _status(
+                result_path,
+                link.session_id,
+                "progress",
+                detail_code="windows_adapter_recovering",
+                message=(
+                    "Windows is releasing the previous Bluetooth session; "
+                    "retrying automatically"
+                ),
+                retry_attempt=attempt,
+            )
+            LOGGER.warning(
+                "Proximity provider start %s/%s failed; creating a fresh provider",
+                attempt,
+                PROXIMITY_PROVIDER_START_ATTEMPTS,
+            )
+            await asyncio.sleep(PROXIMITY_PROVIDER_RETRY_SECONDS)
+    assert last_error is not None
+    raise last_error
 
 
 async def _run(command_path: Path, result_path: Path) -> int:
@@ -135,10 +177,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
                 result_uuid=str(gatt["result_uuid"]),
                 progress_callback=progress,
             )
-            proximity_server = GattProximityServer(
-                ready_uuid=PREFLIGHT_READY_UUID,
-            )
-            await proximity_server.async_start(link)
+            proximity_server = await _start_proximity_server(link, result_path)
             proximity_waiting = True
             _status(
                 result_path,

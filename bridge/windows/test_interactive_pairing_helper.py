@@ -195,6 +195,44 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
     assert proximity_stopped
 
 
+def test_proximity_provider_is_recreated_after_delayed_windows_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    stopped = 0
+
+    class Proximity:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise RuntimeError("adapter still releasing")
+
+        async def async_stop(self) -> None:
+            nonlocal stopped
+            stopped += 1
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    monkeypatch.setattr(helper.asyncio, "sleep", no_sleep)
+    result_path = tmp_path / "result.json"
+
+    server = asyncio.run(helper._start_proximity_server(link(), result_path))
+
+    assert isinstance(server, Proximity)
+    assert attempts == 3
+    assert stopped == 2
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["state"] == "progress"
+    assert result["detail_code"] == "windows_adapter_recovering"
+
+
 def test_command_secret_is_removed_before_parsing(tmp_path: Path) -> None:
     command_path = tmp_path / "command.json"
     result_path = tmp_path / "result.json"

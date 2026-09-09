@@ -2,6 +2,12 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.21 - 2026-09-09
+
+- Recreate the Windows proximity GATT provider when a freshly renewed QR races
+  with delayed Bluetooth adapter cleanup, keeping the same session alive while
+  the receiver retries automatically.
+
 ## 0.1.20 - 2026-09-09
 
 - Keep the encrypted Home Assistant identity payload below the RSA-OAEP limit
