@@ -2,6 +2,15 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.23 - 2026-09-10
+
+- Preserve a pairing attempt for thirty minutes as soon as the iPhone confirms
+  the QR-derived proximity beacon, even when that happens seconds before the
+  original invitation expires.
+- Propagate the handoff lease through the Windows helper, observer, MQTT state,
+  and Home Assistant UI so an in-flight connection cannot be cancelled by a
+  missed intermediate status update.
+
 ## 0.1.22 - 2026-09-09
 
 - Stop the QR proximity beacon as soon as the iPhone's final session

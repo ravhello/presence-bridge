@@ -81,6 +81,11 @@ _PAIRING_COMPLETION_CODES = {
     "iphone_ack_deferred",
     "identity_captured",
 }
+_PAIRING_HANDOFF_CODES = {
+    "iphone_advertisement_seen",
+    "iphone_candidate_unverified",
+    "receiver_proximity_confirmed",
+}
 _FORCED_RENEWAL_COALESCE_SECONDS = 30.0
 
 
@@ -666,10 +671,22 @@ class PresenceBridgeCoordinator:
             now,
             PAIRING_HANDOFF_TIMEOUT,
         )
+        if (
+            attempt_expires_at is None
+            and detail_code in _PAIRING_HANDOFF_CODES
+            and not session.get("completion_expires_at")
+        ):
+            # Matching either QR-derived radio service proves that pairing
+            # started in time. Preserve the attempt even if an intermediate
+            # receiver status packet was overwritten before MQTT publication.
+            attempt_expires_at = now + PAIRING_HANDOFF_TIMEOUT
         if attempt_expires_at is not None and not session.get("completion_expires_at"):
             session["attempt_expires_at"] = attempt_expires_at
             status_extra["attempt_expires_at"] = attempt_expires_at
             status_extra["handoff_started"] = True
+            status_extra["invitation_consumed"] = True
+            status_extra["pairing_uri"] = None
+            status_extra["qr_data_uri"] = None
 
         completion_expires_at = _bounded_lease_deadline(
             payload.get("completion_expires_at"),
@@ -709,6 +726,9 @@ class PresenceBridgeCoordinator:
                     "attempt_expires_at": session["attempt_expires_at"],
                     "effective_expires_at": session["attempt_expires_at"],
                     "handoff_started": True,
+                    "invitation_consumed": True,
+                    "pairing_uri": None,
+                    "qr_data_uri": None,
                 }
             )
         self._set_pairing_state(

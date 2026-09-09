@@ -92,12 +92,21 @@ def test_current_transport_waits_for_proximity_then_pairs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proximity_stopped = asyncio.Event()
+    status_updates: list[dict[str, object]] = []
+    original_status = helper._status
+
+    def record_status(*args: object, **kwargs: object) -> None:
+        status_updates.append(dict(kwargs))
+        original_status(*args, **kwargs)
 
     class Reverse:
         detail_code = "iphone_claim_accepted"
 
         def __init__(self, **_kwargs: object) -> None:
-            pass
+            self.lease_payload: dict[str, int] = {}
+
+        def start_handoff_lease(self) -> None:
+            self.lease_payload["attempt_expires_at"] = int(time.time()) + 1_800
 
         async def async_pair(
             self, _link: PairingLink, _timeout: int
@@ -133,6 +142,7 @@ def test_current_transport_waits_for_proximity_then_pairs(
     monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
     monkeypatch.setattr(helper, "GattPairingServer", Legacy)
     monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    monkeypatch.setattr(helper, "_status", record_status)
     command_path = tmp_path / "command.json"
     result_path = tmp_path / "result.json"
     command_path.write_text(json.dumps(command(link())), encoding="utf-8")
@@ -144,6 +154,12 @@ def test_current_transport_waits_for_proximity_then_pairs(
     assert result["state"] == "success"
     assert result["transport"] == "iphone_peripheral"
     assert proximity_stopped.is_set()
+    proximity_confirmed = next(
+        update
+        for update in status_updates
+        if update.get("detail_code") == "receiver_proximity_confirmed"
+    )
+    assert int(proximity_confirmed["attempt_expires_at"]) > int(time.time())
 
 
 def test_current_transport_keeps_direct_path_for_existing_app_builds(
@@ -158,6 +174,9 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
         def __init__(self, **kwargs: object) -> None:
             self.progress_callback = kwargs["progress_callback"]
             self.lease_payload: dict[str, object] = {}
+
+        def start_handoff_lease(self) -> None:
+            self.lease_payload["attempt_expires_at"] = int(time.time()) + 1_800
 
         async def async_pair(
             self, _link: PairingLink, _timeout: int

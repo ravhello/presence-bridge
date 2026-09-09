@@ -213,6 +213,10 @@ async def _run(command_path: Path, result_path: Path) -> int:
                     await preflight_task
                 else:
                     await iphone_seen_task
+                # The phone has either read the QR-derived proximity service or
+                # started advertising the exact session service. From this point
+                # QR expiry must not interrupt the WinRT role switch.
+                client.start_handoff_lease()
                 proximity_waiting = False
                 _status(
                     result_path,
@@ -223,6 +227,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
                         "iPhone is close enough; secure pairing is starting "
                         "automatically"
                     ),
+                    **client.lease_payload,
                 )
                 await proximity_server.async_stop()
                 proximity_server = None

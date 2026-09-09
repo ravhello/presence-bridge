@@ -1017,7 +1017,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             patch("reverse_gatt_client.time.monotonic", return_value=100.0),
             patch("reverse_gatt_client.time.time", return_value=1_000.0),
         ):
-            client._start_handoff_lease()
+            client.start_handoff_lease()
             client._start_completion_lease()
 
         self.assertEqual(client.lease_payload["attempt_expires_at"], 2_800)

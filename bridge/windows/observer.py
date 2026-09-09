@@ -37,13 +37,14 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from protocol import PairingLink, ProtocolError, b64url_decode
 from reverse_gatt_client import (
     PAIRING_COMPLETION_GRACE_SECONDS,
+    PAIRING_HANDOFF_GRACE_SECONDS,
     ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.22"
+BRIDGE_VERSION = "0.1.23"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -811,6 +812,7 @@ class BlePresenceObserver:
                 "waiting_for_iphone_advertisement": "waiting_for_app",
                 "iphone_advertisement_seen": "connecting",
                 "iphone_candidate_unverified": "connecting",
+                "receiver_proximity_confirmed": "connecting",
                 "iphone_connected": "verifying",
                 "iphone_session_verified": "bonding",
                 "iphone_bond_ready": "bonding",
@@ -1091,6 +1093,23 @@ class BlePresenceObserver:
                     elif attempt_expires_at > now_epoch and not completion_started:
                         deadline = now_monotonic + attempt_expires_at - now_epoch
                         reported_lease["attempt_expires_at"] = attempt_expires_at
+                    elif (
+                        detail_code
+                        in {
+                            "iphone_advertisement_seen",
+                            "iphone_candidate_unverified",
+                            "receiver_proximity_confirmed",
+                        }
+                        and not completion_started
+                    ):
+                        # The helper writes progress atomically and a faster
+                        # follow-up can replace the packet carrying its lease.
+                        # Reconstruct it here rather than falling back to the QR
+                        # deadline while a valid local attempt is in flight.
+                        deadline = now_monotonic + PAIRING_HANDOFF_GRACE_SECONDS
+                        reported_lease["attempt_expires_at"] = int(
+                            time.time() + PAIRING_HANDOFF_GRACE_SECONDS
+                        )
                     elif (
                         detail_code
                         in {

@@ -135,6 +135,10 @@ class ReverseGattPairingClient:
         self._handoff_deadline = time.monotonic() + PAIRING_HANDOFF_GRACE_SECONDS
         self._handoff_expires_at = int(time.time() + PAIRING_HANDOFF_GRACE_SECONDS)
 
+    def start_handoff_lease(self) -> None:
+        """Keep a QR-started attempt alive while transport roles switch."""
+        self._start_handoff_lease()
+
     def _start_completion_lease(self) -> None:
         if self._completion_deadline is not None:
             return
