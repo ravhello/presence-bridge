@@ -2,6 +2,15 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.20 - 2026-09-09
+
+- Keep the encrypted Home Assistant identity payload below the RSA-OAEP limit
+  after an existing Windows bond is recovered.
+- Let the post-bond GATT channel settle and reconnect with the confirmed bond
+  before falling back to local IRK completion.
+- Report an explicit payload-capacity error instead of the opaque
+  `Encryption failed` exception.
+
 ## 0.1.19 - 2026-09-09
 
 - Advertise a QR-scoped Dell proximity service before secure iPhone pairing.

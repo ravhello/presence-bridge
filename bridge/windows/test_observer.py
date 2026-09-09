@@ -14,9 +14,11 @@ from observer import (
     ObserverConfig,
     encrypt_pairing_result,
     normalize_address,
+    pairing_ack_fallback_ready,
     scan_session_is_stale,
     select_irk_record_for_address,
     select_new_irk_records,
+    verified_app_identity_payload,
 )
 
 
@@ -38,6 +40,11 @@ class BlePresenceObserverTest(unittest.TestCase):
         )
         self.assertFalse(scan_session_is_stale(100.0, 180.0, 250.0, 120.0))
         self.assertTrue(scan_session_is_stale(100.0, 180.0, 300.0, 120.0))
+
+    def test_existing_bond_fallback_waits_for_iphone_ack_reconnect(self) -> None:
+        self.assertFalse(pairing_ack_fallback_ready(None, 100.0))
+        self.assertFalse(pairing_ack_fallback_ready(100.0, 129.9))
+        self.assertTrue(pairing_ack_fallback_ready(100.0, 130.0))
 
     def test_new_irk_records_are_unique_and_exclude_the_baseline(self) -> None:
         baseline = [{"irk": "00" * 16, "registry_leaf": "AABBCCDDEEFF"}]
@@ -83,6 +90,37 @@ class BlePresenceObserverTest(unittest.TestCase):
             ),
         )
         self.assertEqual(__import__("json").loads(plaintext)["irk"], "AA" * 16)
+
+    def test_verified_app_identity_omits_oversized_diagnostics(self) -> None:
+        payload = verified_app_identity_payload(
+            {
+                "irk": "AA" * 16,
+                "registry_leaf": "AABBCCDDEEFF",
+                "recovery": "session_scoped_existing_windows_bond",
+            }
+        )
+
+        self.assertEqual(
+            payload,
+            {"irk": "AA" * 16, "claim_verified": True},
+        )
+        self.assertLessEqual(
+            len(__import__("json").dumps(payload, separators=(",", ":")).encode()),
+            190,
+        )
+
+    def test_pairing_result_reports_rsa_oaep_capacity(self) -> None:
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_der = private_key.public_key().public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        with self.assertRaisesRegex(ValueError, "too large for RSA-OAEP"):
+            encrypt_pairing_result(
+                base64.b64encode(public_der).decode("ascii"),
+                {"oversized": "x" * 256},
+            )
 
 
 class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):

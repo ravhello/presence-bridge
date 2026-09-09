@@ -43,7 +43,7 @@ from reverse_gatt_client import (
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.19"
+BRIDGE_VERSION = "0.1.20"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -55,6 +55,7 @@ MIN_PAIRING_TIMEOUT_SECONDS = 60
 SCANNER_PAUSE_TIMEOUT_SECONDS = 10.0
 PAIRING_HEARTBEAT_SECONDS = 10.0
 APP_PAIRING_TRANSPORT = "iphone_peripheral"
+PAIRING_ACK_RECONNECT_GRACE_SECONDS = 30.0
 
 
 def mqtt_reason_is_failure(reason_code: Any) -> bool:
@@ -88,6 +89,14 @@ def scan_session_is_stale(
 ) -> bool:
     """Return whether a live scanner stopped delivering advertisements."""
     return now - max(session_started, last_detection) >= timeout
+
+
+def pairing_ack_fallback_ready(first_seen: float | None, now: float) -> bool:
+    """Allow IRK-only completion only after the iPhone ACK had time to reconnect."""
+    return (
+        first_seen is not None
+        and now - first_seen >= PAIRING_ACK_RECONNECT_GRACE_SECONDS
+    )
 
 
 def read_windows_private_ble_irks() -> list[dict[str, str]]:
@@ -265,6 +274,12 @@ def encrypt_pairing_result(public_key_b64: str, payload: dict[str, Any]) -> str:
         base64.b64decode(public_key_b64, validate=True)
     )
     plaintext = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    max_plaintext = public_key.key_size // 8 - 2 * hashes.SHA256.digest_size - 2
+    if len(plaintext) > max_plaintext:
+        raise ValueError(
+            "Pairing result is too large for RSA-OAEP "
+            f"({len(plaintext)} bytes, maximum {max_plaintext})"
+        )
     ciphertext = public_key.encrypt(
         plaintext,
         padding.OAEP(
@@ -274,6 +289,14 @@ def encrypt_pairing_result(public_key_b64: str, payload: dict[str, Any]) -> str:
         ),
     )
     return base64.b64encode(ciphertext).decode("ascii")
+
+
+def verified_app_identity_payload(record: dict[str, str]) -> dict[str, Any]:
+    """Return only the authenticated identity fields consumed by Home Assistant."""
+    irk = str(record.get("irk") or "").upper()
+    if not re.fullmatch(r"[0-9A-F]{32}", irk):
+        raise ValueError("The paired iPhone IRK is invalid")
+    return {"irk": irk, "claim_verified": True}
 
 
 @dataclass(frozen=True)
@@ -896,19 +919,7 @@ class BlePresenceObserver:
                 if record is not None:
                     encrypted = encrypt_pairing_result(
                         public_key,
-                        {
-                            "irk": record["irk"],
-                            "matched_address": normalize_address(
-                                record.get("registry_leaf")
-                            ),
-                            "captured_at": datetime.now(UTC).isoformat(),
-                            "claim_verified": True,
-                            "recovery": (
-                                "session_scoped_existing_windows_bond"
-                                if reused_bond
-                                else "encrypted_gatt_claim"
-                            ),
-                        },
+                        verified_app_identity_payload(record),
                     )
                     result_payload = {
                         "schema": 2,
@@ -1029,6 +1040,7 @@ class BlePresenceObserver:
         )
         last_update: tuple[str, str] | None = None
         completion_started = False
+        existing_bond_seen_at: float | None = None
         try:
             while True:
                 if result_path.is_file():
@@ -1117,18 +1129,28 @@ class BlePresenceObserver:
                             matched_address,
                         )
                         if record is not None:
-                            progress_callback(
-                                "existing_bond_resolved",
-                                "The QR-matched iPhone already has a valid Windows bond; reusing it",
-                            )
-                            return ReverseGattResult(
-                                address=matched_address,
-                                name=str(
-                                    payload.get("name")
-                                    or "Presence Pair iPhone"
-                                ),
-                                transport="existing_windows_bond",
-                            )
+                            if existing_bond_seen_at is None:
+                                existing_bond_seen_at = now_monotonic
+                                progress_callback(
+                                    "iphone_bond_settling",
+                                    "Bluetooth bond accepted; waiting for the iPhone confirmation channel",
+                                )
+                            elif pairing_ack_fallback_ready(
+                                existing_bond_seen_at,
+                                now_monotonic,
+                            ):
+                                progress_callback(
+                                    "existing_bond_resolved",
+                                    "The QR-matched iPhone already has a valid Windows bond; reusing it",
+                                )
+                                return ReverseGattResult(
+                                    address=matched_address,
+                                    name=str(
+                                        payload.get("name")
+                                        or "Presence Pair iPhone"
+                                    ),
+                                    transport="existing_windows_bond",
+                                )
                     elif state == "success":
                         return ReverseGattResult(
                             address=str(payload.get("address") or ""),

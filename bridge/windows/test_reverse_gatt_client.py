@@ -486,6 +486,38 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(connect.await_args.kwargs["use_cached_services"])
         self.assertTrue(connect.await_args.kwargs["filter_services"])
 
+    async def test_confirmed_bond_pairs_before_encrypted_service_discovery(self) -> None:
+        device = SimpleNamespace(address="40:01:02:0A:C4:A6")
+        connected = Mock(
+            services=[
+                SimpleNamespace(
+                    uuid="session-service",
+                    characteristics=[SimpleNamespace(uuid="session")],
+                )
+            ]
+        )
+        client = ReverseGattPairingClient(
+            service_uuid="legacy-service",
+            session_uuid="session",
+            claim_uuid="claim",
+            result_uuid="result",
+        )
+        client._session_service_uuid = "session-service"
+        client._matched_service_uuid = "session-service"
+        client._secure_bond_confirmed = True
+
+        with patch.object(
+            client,
+            "_connect_candidate",
+            new=AsyncMock(return_value=connected),
+        ) as connect:
+            result = await client._open_candidate(device, 60)
+
+        self.assertIs(result, connected)
+        self.assertTrue(connect.await_args.kwargs["pair_before_discovery"])
+        self.assertFalse(connect.await_args.kwargs["use_cached_services"])
+        self.assertTrue(connect.await_args.kwargs["filter_services"])
+
     async def test_session_scoped_advertisement_refreshes_saved_bond_once(self) -> None:
         link = PairingLink(
             session_id="abcdefghijklmnopQRSTUVWX",

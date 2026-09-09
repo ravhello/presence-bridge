@@ -108,6 +108,7 @@ class ReverseGattPairingClient:
         self._handoff_expires_at: int | None = None
         self._completion_deadline: float | None = None
         self._completion_expires_at: int | None = None
+        self._secure_bond_confirmed = False
 
     @property
     def lease_payload(self) -> dict[str, Any]:
@@ -353,6 +354,17 @@ class ReverseGattPairingClient:
         deadline = time.monotonic() + min(82.0, time_budget)
         detected_type = self._windows_address_type(device)
         strategies: list[_ConnectionStrategy] = []
+        if self._secure_bond_confirmed:
+            strategies.append(
+                _ConnectionStrategy(
+                    "paired encrypted service discovery",
+                    detected_type,
+                    True,
+                    False,
+                    True,
+                    18.0,
+                )
+            )
         strategies.extend([
             _ConnectionStrategy(
                 "native filtered service discovery",
@@ -592,6 +604,7 @@ class ReverseGattPairingClient:
                 )
 
             if await self._windows_reports_paired(client):
+                self._secure_bond_confirmed = True
                 self._progress(
                     "iphone_bond_reconnecting",
                     "Bluetooth bond accepted; reconnecting to confirm completion on the iPhone",
@@ -604,10 +617,12 @@ class ReverseGattPairingClient:
             try:
                 remaining = max(3.0, deadline - time.monotonic())
                 await asyncio.wait_for(client.pair(), timeout=min(30.0, remaining))
+                self._secure_bond_confirmed = True
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 if await self._windows_reports_paired(client):
+                    self._secure_bond_confirmed = True
                     LOGGER.warning(
                         "WinRT reported a pairing error after committing the bond: %s",
                         self._error_summary(error),
@@ -637,9 +652,20 @@ class ReverseGattPairingClient:
                     raise
 
             self._progress(
-                "iphone_bond_ready",
-                "Secure Bluetooth bond accepted; finishing locally in Home Assistant",
+                "iphone_bond_settling",
+                "Secure Bluetooth bond accepted; waiting for the encrypted link to settle",
             )
+            await asyncio.sleep(1.25)
+
+            if not client.is_connected:
+                self._progress(
+                    "iphone_bond_reconnecting",
+                    "Bluetooth bond accepted; reconnecting to confirm completion on the iPhone",
+                )
+                raise ReverseGattError(
+                    "The Bluetooth bond is ready; reconnecting to acknowledge the app",
+                    "iphone_bond_reconnecting",
+                )
 
             try:
                 remaining = max(3.0, deadline - time.monotonic())
@@ -699,6 +725,7 @@ class ReverseGattPairingClient:
         self._handoff_expires_at = None
         self._completion_deadline = None
         self._completion_expires_at = None
+        self._secure_bond_confirmed = False
         invitation_deadline = min(
             time.monotonic() + timeout_seconds,
             time.monotonic() + max(1, link.expires_at - int(time.time())),
