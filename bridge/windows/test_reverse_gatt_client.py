@@ -430,7 +430,6 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             result = await client._open_candidate(
                 device,
                 60,
-                allow_bond_reset=False,
             )
 
         self.assertIs(result, connected)
@@ -472,7 +471,6 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             result = await client._open_candidate(
                 device,
                 60,
-                allow_bond_reset=False,
             )
 
         self.assertIs(result, fresh)
@@ -483,7 +481,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(connect.await_args_list[1].kwargs["pair_before_discovery"])
         empty_native.disconnect.assert_awaited_once()
 
-    async def test_timeout_clears_one_matching_bond_before_retry(self) -> None:
+    async def test_timeout_never_clears_bond_before_qr_verification(self) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
         client = ReverseGattPairingClient(
             service_uuid="service",
@@ -500,17 +498,16 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
             patch("reverse_gatt_client.time.monotonic", side_effect=range(100, 400)),
-            self.assertRaises(BondResetRequiredError),
+            self.assertRaises(TimeoutError),
         ):
             await client._open_candidate(
                 device,
                 82,
-                allow_bond_reset=True,
             )
 
-        unpair.assert_awaited_once_with(device, address_type="random")
+        unpair.assert_not_awaited()
 
-    async def test_resets_stale_bond_when_winrt_fails_before_service_read(self) -> None:
+    async def test_gatt_error_never_clears_bond_before_qr_verification(self) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
         client = ReverseGattPairingClient(
             service_uuid="service",
@@ -526,17 +523,16 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=BleakGATTProtocolError(0xF2),
             ),
             patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
-            self.assertRaises(BondResetRequiredError),
+            self.assertRaises(BleakGATTProtocolError),
         ):
             await client._open_candidate(
                 device,
                 40,
-                allow_bond_reset=True,
             )
 
-        unpair.assert_awaited_once_with(device, address_type="random")
+        unpair.assert_not_awaited()
 
-    async def test_resets_partial_bond_when_explicit_pairing_fails(self) -> None:
+    async def test_connect_error_never_clears_bond_before_qr_verification(self) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
         client = ReverseGattPairingClient(
             service_uuid="service",
@@ -552,15 +548,14 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=BleakError("Could not pair with device: FAILED"),
             ),
             patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
-            self.assertRaises(BondResetRequiredError),
+            self.assertRaises(BleakError),
         ):
             await client._open_candidate(
                 device,
                 40,
-                allow_bond_reset=True,
             )
 
-        unpair.assert_awaited_once_with(device, address_type="random")
+        unpair.assert_not_awaited()
 
     async def test_does_not_unpair_for_unrelated_gatt_protocol_error(self) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
@@ -583,7 +578,6 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             await client._open_candidate(
                 device,
                 40,
-                allow_bond_reset=True,
             )
 
         unpair.assert_not_awaited()
@@ -633,7 +627,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
 
         bleak_client.unpair.assert_awaited_once()
 
-    async def test_resets_bond_when_windows_hides_entire_gatt_service(self) -> None:
+    async def test_missing_gatt_service_does_not_clear_unverified_bond(self) -> None:
         link = PairingLink(
             session_id="abcdefghijklmnopQRSTUVWX",
             observer_id="dell_cucina",
@@ -662,7 +656,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(client, "_open_candidate", return_value=bleak_client),
             patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
-            self.assertRaises(BondResetRequiredError),
+            self.assertRaises(BleakCharacteristicNotFoundError),
         ):
             await client._pair_candidate(
                 device,
@@ -672,9 +666,9 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
 
         bleak_client.disconnect.assert_awaited_once()
-        unpair.assert_awaited_once_with(device, address_type="random")
+        unpair.assert_not_awaited()
 
-    async def test_resets_bond_when_windows_hides_only_presence_service(
+    async def test_missing_presence_service_does_not_clear_unverified_bond(
         self,
     ) -> None:
         link = PairingLink(
@@ -707,7 +701,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(client, "_open_candidate", return_value=bleak_client),
             patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
-            self.assertRaises(BondResetRequiredError),
+            self.assertRaises(BleakCharacteristicNotFoundError),
         ):
             await client._pair_candidate(
                 device,
@@ -716,7 +710,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
                 allow_bond_reset=True,
             )
 
-        unpair.assert_awaited_once_with(device, address_type="random")
+        unpair.assert_not_awaited()
 
     async def test_bond_reset_budget_is_scoped_to_private_address(self) -> None:
         link = PairingLink(

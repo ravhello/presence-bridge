@@ -108,7 +108,10 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
             except OSError:
                 break
             value_index += 1
-            if "irk" not in value_name.casefold():
+            normalized_name = value_name.casefold()
+            # CentralIRK belongs to the local Windows adapter. It cannot
+            # resolve a phone address and must never be exported as a peer.
+            if normalized_name == "centralirk" or "irk" not in normalized_name:
                 continue
             if not isinstance(value, bytes) or len(value) != 16:
                 continue

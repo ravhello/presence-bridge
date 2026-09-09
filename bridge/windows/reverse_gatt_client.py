@@ -323,10 +323,14 @@ class ReverseGattPairingClient:
         self,
         device: Any,
         time_budget: float,
-        *,
-        allow_bond_reset: bool,
     ) -> BleakClient:
-        """Open GATT using native, pre-pair, cache, and address fallbacks."""
+        """Open GATT using bounded WinRT discovery fallbacks.
+
+        Discovery errors are not proof of a stale bond. In particular, iOS can
+        briefly close a new peripheral session while Windows is enumerating its
+        services. Never remove a saved phone bond at this stage; a reset is only
+        allowed later, after the QR session and HMAC claim have been verified.
+        """
         deadline = time.monotonic() + min(82.0, time_budget)
         detected_type = self._windows_address_type(device)
         strategies = [
@@ -420,26 +424,6 @@ class ReverseGattPairingClient:
                     str(strategy.pair_before_discovery).lower(),
                     self._error_summary(error),
                 )
-                if allow_bond_reset and self._is_resettable_bond_error(error):
-                    self._progress(
-                        "iphone_bond_reset",
-                        "Windows found an unusable saved phone bond; removing only that bond before retrying",
-                    )
-                    try:
-                        await self._unpair_candidate(
-                            device,
-                            address_type=detected_type,
-                        )
-                    except BaseException as unpair_error:
-                        raise BondResetRequiredError(
-                            "Windows detected a stale phone bond but could not remove it "
-                            f"({self._error_summary(unpair_error)})",
-                            "iphone_bond_reset_failed",
-                        ) from unpair_error
-                    raise BondResetRequiredError(
-                        "Windows removed the stale phone bond; retrying the active QR session",
-                        "iphone_bond_reset",
-                    ) from error
                 if index + 1 < len(strategies):
                     self._progress(
                         "iphone_connection_retry",
@@ -449,26 +433,6 @@ class ReverseGattPairingClient:
 
         if last_error is None:
             raise TimeoutError("No time remained for a Bluetooth connection")
-        if allow_bond_reset and isinstance(
-            last_error,
-            TimeoutError | BleakCharacteristicNotFoundError,
-        ):
-            self._progress(
-                "iphone_bond_reset",
-                "Windows could not reuse the saved phone state; clearing only this Presence Pair bond before retrying",
-            )
-            try:
-                await self._unpair_candidate(device, address_type=detected_type)
-            except BaseException as unpair_error:
-                LOGGER.warning(
-                    "Unable to clear the advertised iPhone bond after connection failure: %s",
-                    self._error_summary(unpair_error),
-                )
-            else:
-                raise BondResetRequiredError(
-                    "Windows cleared the previous phone bond; retrying the active QR session",
-                    "iphone_bond_reset",
-                ) from last_error
         raise last_error
 
     @staticmethod
@@ -518,7 +482,6 @@ class ReverseGattPairingClient:
         client = await self._open_candidate(
             device,
             max(3.0, deadline - time.monotonic()),
-            allow_bond_reset=allow_bond_reset,
         )
         try:
             self._progress(
@@ -527,41 +490,12 @@ class ReverseGattPairingClient:
             )
             try:
                 session_value = await client.read_gatt_char(self.session_uuid)
-            except (BleakCharacteristicNotFoundError, BleakGATTProtocolError) as error:
+            except (BleakCharacteristicNotFoundError, BleakGATTProtocolError):
                 inventory = self._gatt_inventory(client)
                 LOGGER.warning(
                     "Presence Pair GATT session unavailable after connect: %s",
                     inventory,
                 )
-                schema_blocked = isinstance(
-                    error,
-                    BleakCharacteristicNotFoundError,
-                ) and self.session_uuid not in inventory
-                if allow_bond_reset and (
-                    schema_blocked or self._is_resettable_bond_error(error)
-                ):
-                    self._progress(
-                        "iphone_bond_reset",
-                        "Windows retained an incomplete phone bond; removing it before reconnecting",
-                    )
-                    with suppress(Exception):
-                        if client.is_connected:
-                            await asyncio.wait_for(client.disconnect(), timeout=8)
-                    try:
-                        await self._unpair_candidate(
-                            device,
-                            address_type=self._windows_address_type(device),
-                        )
-                    except BaseException as unpair_error:
-                        raise BondResetRequiredError(
-                            "Windows hid the phone service behind an incomplete bond and "
-                            f"could not remove it ({self._error_summary(unpair_error)})",
-                            "iphone_bond_reset_failed",
-                        ) from unpair_error
-                    raise BondResetRequiredError(
-                        "Windows removed the incomplete phone bond; reconnecting the active QR session",
-                        "iphone_bond_reset",
-                    ) from error
                 raise
             session = self._decode_json(session_value, "session")
             if not self._session_matches(link, session):
