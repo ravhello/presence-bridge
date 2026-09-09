@@ -121,9 +121,13 @@ async def _run(command_path: Path, result_path: Path) -> int:
     client: ReverseGattPairingClient | None = None
     client_task: asyncio.Task[ReverseGattResult] | None = None
     preflight_task: asyncio.Task[dict[str, Any]] | None = None
+    iphone_seen_task: asyncio.Task[bool] | None = None
+    iphone_seen = asyncio.Event()
     proximity_waiting = False
 
     def progress(detail_code: str, message: str) -> None:
+        if detail_code == "iphone_advertisement_seen":
+            iphone_seen.set()
         if proximity_waiting and detail_code in {
             "waiting_for_iphone_advertisement",
             "windows_adapter_recovering",
@@ -197,14 +201,18 @@ async def _run(command_path: Path, result_path: Path) -> int:
             preflight_task = asyncio.create_task(
                 proximity_server.async_wait_until_ready(timeout_seconds)
             )
+            iphone_seen_task = asyncio.create_task(iphone_seen.wait())
             done, _pending = await asyncio.wait(
-                {client_task, preflight_task},
+                {client_task, preflight_task, iphone_seen_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if client_task in done:
                 peer = await client_task
             else:
-                await preflight_task
+                if preflight_task in done:
+                    await preflight_task
+                else:
+                    await iphone_seen_task
                 proximity_waiting = False
                 _status(
                     result_path,
@@ -237,7 +245,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
         )
         raise
     finally:
-        for task in (preflight_task, client_task):
+        for task in (iphone_seen_task, preflight_task, client_task):
             if task is not None and not task.done():
                 task.cancel()
                 with suppress(BaseException):

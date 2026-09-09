@@ -150,17 +150,23 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    proximity_stopped = False
+    proximity_stopped = asyncio.Event()
 
     class Reverse:
         detail_code = "iphone_claim_accepted"
 
-        def __init__(self, **_kwargs: object) -> None:
-            pass
+        def __init__(self, **kwargs: object) -> None:
+            self.progress_callback = kwargs["progress_callback"]
+            self.lease_payload: dict[str, object] = {}
 
         async def async_pair(
             self, _link: PairingLink, _timeout: int
         ) -> ReverseGattResult:
+            self.progress_callback(
+                "iphone_advertisement_seen",
+                "iPhone found",
+            )
+            await proximity_stopped.wait()
             return ReverseGattResult(
                 address="AA:BB:CC:DD:EE:FF",
                 name="Presence Pair",
@@ -180,8 +186,7 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
             raise AssertionError("cancelled proximity task resumed")
 
         async def async_stop(self) -> None:
-            nonlocal proximity_stopped
-            proximity_stopped = True
+            proximity_stopped.set()
 
     monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
     monkeypatch.setattr(helper, "GattProximityServer", Proximity)
@@ -192,7 +197,7 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
     assert asyncio.run(
         asyncio.wait_for(helper._run(command_path, result_path), timeout=2)
     ) == 0
-    assert proximity_stopped
+    assert proximity_stopped.is_set()
 
 
 def test_proximity_provider_is_recreated_after_delayed_windows_release(
