@@ -9,15 +9,17 @@ import json
 import logging
 import os
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from gatt_server import GattPairingServer
+from gatt_server import GattPairingServer, GattProximityServer
 from protocol import PairingLink
 from reverse_gatt_client import ReverseGattPairingClient, ReverseGattResult
 
 LOGGER = logging.getLogger("presence_bridge.interactive_pairing")
+PREFLIGHT_READY_UUID = "b6201f73-89f1-4c2b-981f-7ccade5a52d4"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -75,8 +77,16 @@ async def _run(command_path: Path, result_path: Path) -> int:
     transport = str(raw.get("transport") or "iphone_peripheral")
     timeout_seconds = max(60, min(600, int(raw.get("timeout_seconds", 180))))
     client: ReverseGattPairingClient | None = None
+    client_task: asyncio.Task[ReverseGattResult] | None = None
+    preflight_task: asyncio.Task[dict[str, Any]] | None = None
+    proximity_waiting = False
 
     def progress(detail_code: str, message: str) -> None:
+        if proximity_waiting and detail_code in {
+            "waiting_for_iphone_advertisement",
+            "windows_adapter_recovering",
+        }:
+            return
         _status(
             result_path,
             link.session_id,
@@ -94,6 +104,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
         message="The logged-in Windows Bluetooth session is ready for the iPhone",
     )
     server: GattPairingServer | None = None
+    proximity_server: GattProximityServer | None = None
     try:
         if transport == "windows_peripheral":
             server = GattPairingServer(
@@ -124,7 +135,51 @@ async def _run(command_path: Path, result_path: Path) -> int:
                 result_uuid=str(gatt["result_uuid"]),
                 progress_callback=progress,
             )
-            peer = await client.async_pair(link, timeout_seconds)
+            proximity_server = GattProximityServer(
+                ready_uuid=PREFLIGHT_READY_UUID,
+            )
+            await proximity_server.async_start(link)
+            proximity_waiting = True
+            _status(
+                result_path,
+                link.session_id,
+                "progress",
+                detail_code="receiver_proximity_check",
+                message=(
+                    "Receiver beacon ready; the iPhone will start pairing "
+                    "automatically when the signal is strong enough"
+                ),
+            )
+            # Keep the previous direct path alive for already released app builds.
+            # The QR-scoped beacon is a different service and cannot match this scan.
+            client_task = asyncio.create_task(
+                client.async_pair(link, timeout_seconds)
+            )
+            preflight_task = asyncio.create_task(
+                proximity_server.async_wait_until_ready(timeout_seconds)
+            )
+            done, _pending = await asyncio.wait(
+                {client_task, preflight_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if client_task in done:
+                peer = await client_task
+            else:
+                await preflight_task
+                proximity_waiting = False
+                _status(
+                    result_path,
+                    link.session_id,
+                    "progress",
+                    detail_code="receiver_proximity_confirmed",
+                    message=(
+                        "iPhone is close enough; secure pairing is starting "
+                        "automatically"
+                    ),
+                )
+                await proximity_server.async_stop()
+                proximity_server = None
+                peer = await client_task
         else:
             raise ValueError(f"Unsupported pairing transport: {transport}")
     except BaseException as error:
@@ -139,9 +194,17 @@ async def _run(command_path: Path, result_path: Path) -> int:
             "error",
             detail_code=detail_code,
             message=f"{type(error).__name__}: {str(error).strip()}"[:300],
+            **(client.lease_payload if client is not None else {}),
         )
         raise
     finally:
+        for task in (preflight_task, client_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with suppress(BaseException):
+                    await task
+        if proximity_server is not None:
+            await proximity_server.async_stop()
         if server is not None:
             await server.async_stop()
 

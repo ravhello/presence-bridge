@@ -9,7 +9,12 @@ import sys
 import uuid
 from typing import Any
 
-from protocol import PairingLink, public_session_payload, verify_claim
+from protocol import (
+    PairingLink,
+    preflight_service_uuid,
+    public_session_payload,
+    verify_claim,
+)
 
 LOGGER = logging.getLogger("presence_bridge.gatt_server")
 ATT_ERROR_UNLIKELY = 0x0E
@@ -389,3 +394,104 @@ class GattPairingServer:
         if self._claim_future is not None and not self._claim_future.done():
             self._claim_future.cancel()
         self._claim_future = None
+
+
+class GattProximityServer(GattPairingServer):
+    """Advertise a QR-scoped plaintext gate before secure pairing starts."""
+
+    def __init__(self, *, ready_uuid: str) -> None:
+        super().__init__(
+            service_uuid="00000000-0000-0000-0000-000000000000",
+            session_uuid="00000000-0000-0000-0000-000000000000",
+            claim_uuid=ready_uuid,
+            result_uuid="00000000-0000-0000-0000-000000000000",
+        )
+
+    async def async_start(self, link: PairingLink) -> None:
+        """Publish the receiver beacon and its authenticated ready write."""
+        if sys.platform != "win32":
+            raise RuntimeError("The proximity preflight requires Windows")
+        link.validate()
+        self.service_uuid = preflight_service_uuid(link)
+        self._loop = asyncio.get_running_loop()
+        self._link = link
+        self._claim_future = self._loop.create_future()
+
+        from winrt.windows.devices.bluetooth.genericattributeprofile import (
+            GattCharacteristicProperties,
+            GattLocalCharacteristicParameters,
+            GattProtectionLevel,
+            GattServiceProvider,
+            GattServiceProviderAdvertisingParameters,
+        )
+
+        try:
+            provider_result = await GattServiceProvider.create_async(
+                uuid.UUID(self.service_uuid)
+            )
+            if (
+                int(provider_result.error) != 0
+                or provider_result.service_provider is None
+            ):
+                raise RuntimeError(
+                    f"Unable to create proximity provider: {provider_result.error}"
+                )
+            self._provider = provider_result.service_provider
+            self._advertisement_status_token = (
+                self._provider.add_advertisement_status_changed(
+                    self._on_advertisement_status_changed
+                )
+            )
+
+            ready_parameters = GattLocalCharacteristicParameters()
+            ready_parameters.characteristic_properties = (
+                GattCharacteristicProperties.WRITE
+            )
+            ready_parameters.write_protection_level = GattProtectionLevel.PLAIN
+            ready_parameters.user_description = "Presence Pair proximity ready"
+            ready_result = await self._provider.service.create_characteristic_async(
+                uuid.UUID(self.claim_uuid),
+                ready_parameters,
+            )
+            if int(ready_result.error) != 0 or ready_result.characteristic is None:
+                raise RuntimeError(
+                    "Unable to create proximity characteristic: "
+                    f"{ready_result.error}"
+                )
+            self._claim_characteristic = ready_result.characteristic
+            self._claim_token = self._claim_characteristic.add_write_requested(
+                self._on_write_requested
+            )
+
+            advertising = GattServiceProviderAdvertisingParameters()
+            advertising.is_connectable = True
+            advertising.is_discoverable = True
+            for attempt in range(1, ADVERTISEMENT_START_ATTEMPTS + 1):
+                try:
+                    self._provider.start_advertising_with_parameters(advertising)
+                    await self._async_wait_until_advertising()
+                    break
+                except Exception:
+                    if attempt >= ADVERTISEMENT_START_ATTEMPTS:
+                        raise
+                    LOGGER.warning(
+                        "Proximity advertising attempt %s/%s failed; retrying",
+                        attempt,
+                        ADVERTISEMENT_START_ATTEMPTS,
+                    )
+                    try:
+                        self._provider.stop_advertising()
+                    except Exception:
+                        LOGGER.debug(
+                            "Unable to stop failed proximity advertisement",
+                            exc_info=True,
+                        )
+                    await asyncio.sleep(1)
+            LOGGER.info("QR-scoped Presence Pair proximity beacon is advertising")
+        except Exception:
+            await self.async_stop()
+            raise
+
+    async def async_wait_until_ready(self, timeout_seconds: float) -> dict[str, Any]:
+        """Wait for the nearby iPhone's authenticated preflight write."""
+        return await self.async_wait_for_claim(timeout_seconds)

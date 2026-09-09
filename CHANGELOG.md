@@ -2,6 +2,20 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.19 - 2026-09-09
+
+- Advertise a QR-scoped Dell proximity service before secure iPhone pairing.
+- Let Presence Pair measure the receiver signal and delay pairing until the
+  phone is close enough, while preserving the direct path for existing builds.
+- Start the encrypted exchange automatically after authenticated proximity
+  confirmation, without requiring a Windows prompt.
+
+## 0.1.18 - 2026-09-09
+
+- Reuse an existing QR-matched Windows BLE bond before requesting another pairing.
+- Preserve an accepted QR attempt while waiting for a stable local radio link.
+- Report weak iPhone RSSI explicitly instead of repeatedly opening an unusable GATT route.
+
 ## 0.1.17 - 2026-09-07
 
 - Keep a QR code valid for ten minutes only as an invitation to start pairing.

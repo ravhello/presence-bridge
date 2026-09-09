@@ -20,6 +20,7 @@ from protocol import (
 )
 from reverse_gatt_client import (
     BondResetRequiredError,
+    ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
 )
@@ -70,6 +71,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             result_uuid="result",
         )
         dynamic_uuid = pairing_service_uuid(link)
+        client._session_service_uuid = dynamic_uuid
         client.service_uuids.add(dynamic_uuid)
 
         self.assertTrue(
@@ -83,6 +85,14 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertEqual(client._matched_service_uuid, dynamic_uuid)
+        client._matched_address = "40:01:02:0A:C4:A6"
+        self.assertEqual(
+            client.lease_payload,
+            {
+                "matched_address": "40:01:02:0A:C4:A6",
+                "session_scoped_advertisement": True,
+            },
+        )
 
         self.assertTrue(
             client._matches_advertisement(
@@ -209,7 +219,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.address, device.address)
-        initial_client.pair.assert_awaited_once()
+        initial_client.pair.assert_not_awaited()
         initial_client.disconnect.assert_awaited_once()
         acknowledgement = json.loads(
             initial_client.write_gatt_char.await_args.args[1].decode()
@@ -218,11 +228,11 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(acknowledgement["proof"], acceptance_proof(link))
         self.assertEqual(
             events,
-            ["read:session", "read:claim", "pair", "write:result"],
+            ["read:session", "read:claim", "write:result"],
         )
         self.assertEqual(progress[-1], "iphone_claim_accepted")
 
-    async def test_closed_ack_channel_after_bond_does_not_repeat_pairing(self) -> None:
+    async def test_closed_ack_channel_after_bond_reconnects_without_unpairing(self) -> None:
         link = PairingLink(
             session_id="abcdefghijklmnopQRSTUVWX",
             observer_id="dell_cucina",
@@ -247,7 +257,9 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             ),
             pair=AsyncMock(),
             unpair=AsyncMock(),
-            write_gatt_char=AsyncMock(side_effect=BleakGATTProtocolError(0x05)),
+            write_gatt_char=AsyncMock(
+                side_effect=[BleakGATTProtocolError(0x05), TimeoutError()]
+            ),
             disconnect=AsyncMock(),
         )
         progress: list[str] = []
@@ -262,19 +274,20 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(client, "_open_candidate", return_value=bleak_client),
             patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
+            self.assertRaises(ReverseGattError) as raised,
         ):
-            result = await client._pair_candidate(
+            await client._pair_candidate(
                 device,
                 link,
                 60,
                 allow_bond_reset=True,
             )
 
-        self.assertEqual(result.address, device.address)
+        self.assertEqual(raised.exception.detail_code, "iphone_bond_reconnecting")
         bleak_client.pair.assert_awaited_once()
         bleak_client.unpair.assert_not_awaited()
-        bleak_client.write_gatt_char.assert_awaited_once()
-        self.assertEqual(progress[-1], "iphone_ack_deferred")
+        self.assertEqual(bleak_client.write_gatt_char.await_count, 2)
+        self.assertEqual(progress[-1], "iphone_bond_reconnecting")
 
     async def test_winrt_pair_error_is_accepted_when_bond_was_committed(self) -> None:
         link = PairingLink(
@@ -296,9 +309,11 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             read_gatt_char=AsyncMock(
                 side_effect=[json.dumps(session).encode(), json.dumps(claim).encode()]
             ),
-            pair=AsyncMock(side_effect=BleakError("Failure trying to pair with device!")),
+            pair=AsyncMock(
+                side_effect=BleakError("Failure trying to pair with device!")
+            ),
             unpair=AsyncMock(),
-            write_gatt_char=AsyncMock(),
+            write_gatt_char=AsyncMock(side_effect=BleakGATTProtocolError(0x05)),
             disconnect=AsyncMock(),
         )
         client = ReverseGattPairingClient(
@@ -316,15 +331,16 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=True),
             ),
             patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
+            self.assertRaises(ReverseGattError) as raised,
         ):
-            result = await client._pair_candidate(
+            await client._pair_candidate(
                 device,
                 link,
                 40,
                 allow_bond_reset=True,
             )
 
-        self.assertEqual(result.address, device.address)
+        self.assertEqual(raised.exception.detail_code, "iphone_bond_reconnecting")
         bleak_client.unpair.assert_not_awaited()
         bleak_client.write_gatt_char.assert_awaited_once()
 
@@ -438,6 +454,158 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(connect.await_args_list[0].kwargs["use_cached_services"])
         self.assertFalse(connect.await_args_list[1].kwargs["use_cached_services"])
         self.assertFalse(connect.await_args_list[1].kwargs["filter_services"])
+
+    async def test_session_scoped_service_does_not_pair_before_discovery(self) -> None:
+        device = SimpleNamespace(address="40:01:02:0A:C4:A6")
+        connected = Mock(
+            services=[
+                SimpleNamespace(
+                    uuid="session-service",
+                    characteristics=[SimpleNamespace(uuid="session")],
+                )
+            ]
+        )
+        client = ReverseGattPairingClient(
+            service_uuid="legacy-service",
+            session_uuid="session",
+            claim_uuid="claim",
+            result_uuid="result",
+        )
+        client._session_service_uuid = "session-service"
+        client._matched_service_uuid = "session-service"
+
+        with patch.object(
+            client,
+            "_connect_candidate",
+            new=AsyncMock(return_value=connected),
+        ) as connect:
+            result = await client._open_candidate(device, 60)
+
+        self.assertIs(result, connected)
+        self.assertFalse(connect.await_args.kwargs["pair_before_discovery"])
+        self.assertIsNone(connect.await_args.kwargs["use_cached_services"])
+        self.assertTrue(connect.await_args.kwargs["filter_services"])
+
+    async def test_session_scoped_advertisement_refreshes_saved_bond_once(self) -> None:
+        link = PairingLink(
+            session_id="abcdefghijklmnopQRSTUVWX",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 180,
+            secret=bytes(range(32)),
+        )
+        dynamic_uuid = pairing_service_uuid(link)
+        address_type = SimpleNamespace(name="RANDOM")
+        device = SimpleNamespace(
+            address="40:01:02:0A:C4:A6",
+            name="Presence Pair",
+            details=SimpleNamespace(
+                adv=SimpleNamespace(bluetooth_address_type=address_type),
+                scan=None,
+            ),
+        )
+        advertisement = SimpleNamespace(
+            service_uuids=[dynamic_uuid],
+            service_data={},
+            local_name="Presence Pair",
+            rssi=-52,
+            tx_power=None,
+        )
+        expected = ReverseGattResult(address=device.address, name=device.name)
+        client = ReverseGattPairingClient(
+            service_uuid="service",
+            session_uuid="session",
+            claim_uuid="claim",
+            result_uuid="result",
+        )
+
+        async def find_device(filter_func: object, **_kwargs: object) -> object:
+            self.assertTrue(filter_func(device, advertisement))
+            return device
+
+        with (
+            patch.object(
+                BleakScanner,
+                "find_device_by_filter",
+                new=AsyncMock(side_effect=find_device),
+            ),
+            patch.object(client, "_unpair_candidate", new=AsyncMock()) as unpair,
+            patch.object(
+                client,
+                "_pair_candidate",
+                new=AsyncMock(
+                    side_effect=[
+                        BleakCharacteristicNotFoundError("session"),
+                        expected,
+                    ]
+                ),
+            ) as pair_candidate,
+            patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
+        ):
+            actual = await client.async_pair(link, 30)
+
+        self.assertEqual(actual, expected)
+        unpair.assert_awaited_once_with(device, address_type="random")
+        self.assertEqual(pair_candidate.await_count, 2)
+        self.assertTrue(pair_candidate.await_args_list[0].kwargs["allow_bond_reset"])
+        self.assertFalse(pair_candidate.await_args_list[1].kwargs["allow_bond_reset"])
+
+    async def test_weak_signal_waits_before_opening_gatt(self) -> None:
+        link = PairingLink(
+            session_id="abcdefghijklmnopQRSTUVWX",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 180,
+            secret=bytes(range(32)),
+        )
+        dynamic_uuid = pairing_service_uuid(link)
+        device = SimpleNamespace(address="40:01:02:0A:C4:A6", name="Presence Pair")
+        weak = SimpleNamespace(
+            service_uuids=[dynamic_uuid],
+            service_data={},
+            local_name="Presence Pair",
+            rssi=-89,
+            tx_power=None,
+        )
+        strong = SimpleNamespace(
+            service_uuids=[dynamic_uuid],
+            service_data={},
+            local_name="Presence Pair",
+            rssi=-60,
+            tx_power=None,
+        )
+        expected = ReverseGattResult(address=device.address, name=device.name)
+        progress: list[str] = []
+        client = ReverseGattPairingClient(
+            service_uuid="service",
+            session_uuid="session",
+            claim_uuid="claim",
+            result_uuid="result",
+            progress_callback=lambda detail, _message: progress.append(detail),
+        )
+        advertisements = iter((weak, strong))
+
+        async def find_device(filter_func: object, **_kwargs: object) -> object:
+            self.assertTrue(filter_func(device, next(advertisements)))
+            return device
+
+        with (
+            patch.object(
+                BleakScanner,
+                "find_device_by_filter",
+                new=AsyncMock(side_effect=find_device),
+            ),
+            patch.object(
+                client,
+                "_pair_candidate",
+                new=AsyncMock(return_value=expected),
+            ) as pair_candidate,
+            patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
+        ):
+            actual = await client.async_pair(link, 30)
+
+        self.assertEqual(actual, expected)
+        pair_candidate.assert_awaited_once()
+        self.assertIn("iphone_signal_too_weak", progress)
+        self.assertEqual(client.lease_payload["rssi"], -60)
 
     async def test_open_candidate_rejects_empty_cache_and_uses_fresh_discovery(
         self,

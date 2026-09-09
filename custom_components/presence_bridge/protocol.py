@@ -136,6 +136,18 @@ def pairing_service_uuid(link: PairingLink) -> str:
     return str(uuid.UUID(bytes=bytes(raw)))
 
 
+def preflight_service_uuid(link: PairingLink) -> str:
+    """Derive the Dell proximity beacon UUID for one QR session."""
+    link.validate(allow_expired=True)
+    message = (
+        f"presence-bridge-preflight:v{link.version}\n{link.session_id}"
+    ).encode("ascii")
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
+
+
 def claim_proof(link: PairingLink) -> str:
     """Build the app's HMAC proof without transmitting the QR secret."""
     link.validate(allow_expired=True)

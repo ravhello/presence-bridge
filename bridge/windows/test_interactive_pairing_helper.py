@@ -87,10 +87,71 @@ def test_legacy_transport_can_win_automatic_pairing(
     assert not command_path.exists()
 
 
-def test_current_transport_scans_without_starting_legacy_server(
+def test_current_transport_waits_for_proximity_then_pairs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    proximity_stopped = asyncio.Event()
+
+    class Reverse:
+        detail_code = "iphone_claim_accepted"
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_pair(
+            self, _link: PairingLink, _timeout: int
+        ) -> ReverseGattResult:
+            await proximity_stopped.wait()
+            return ReverseGattResult(
+                address="AA:BB:CC:DD:EE:FF",
+                name="Presence Pair",
+            )
+
+    class Legacy:
+        def __init__(self, **_kwargs: object) -> None:
+            raise AssertionError("legacy server must not reserve the adapter")
+
+    class Proximity:
+        stopped = False
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            return None
+
+        async def async_wait_until_ready(
+            self, _timeout: int
+        ) -> dict[str, bool]:
+            return {"claim_verified": True}
+
+        async def async_stop(self) -> None:
+            self.stopped = True
+            proximity_stopped.set()
+
+    monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
+    monkeypatch.setattr(helper, "GattPairingServer", Legacy)
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(command(link())), encoding="utf-8")
+
+    assert asyncio.run(
+        asyncio.wait_for(helper._run(command_path, result_path), timeout=2)
+    ) == 0
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["state"] == "success"
+    assert result["transport"] == "iphone_peripheral"
+    assert proximity_stopped.is_set()
+
+
+def test_current_transport_keeps_direct_path_for_existing_app_builds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proximity_stopped = False
+
     class Reverse:
         detail_code = "iphone_claim_accepted"
 
@@ -105,20 +166,33 @@ def test_current_transport_scans_without_starting_legacy_server(
                 name="Presence Pair",
             )
 
-    class Legacy:
+    class Proximity:
         def __init__(self, **_kwargs: object) -> None:
-            raise AssertionError("legacy server must not reserve the adapter")
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            return None
+
+        async def async_wait_until_ready(
+            self, _timeout: int
+        ) -> dict[str, bool]:
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled proximity task resumed")
+
+        async def async_stop(self) -> None:
+            nonlocal proximity_stopped
+            proximity_stopped = True
 
     monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
-    monkeypatch.setattr(helper, "GattPairingServer", Legacy)
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
     command_path = tmp_path / "command.json"
     result_path = tmp_path / "result.json"
     command_path.write_text(json.dumps(command(link())), encoding="utf-8")
 
-    assert asyncio.run(helper._run(command_path, result_path)) == 0
-    result = json.loads(result_path.read_text(encoding="utf-8"))
-    assert result["state"] == "success"
-    assert result["transport"] == "iphone_peripheral"
+    assert asyncio.run(
+        asyncio.wait_for(helper._run(command_path, result_path), timeout=2)
+    ) == 0
+    assert proximity_stopped
 
 
 def test_command_secret_is_removed_before_parsing(tmp_path: Path) -> None:

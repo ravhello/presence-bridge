@@ -43,7 +43,7 @@ from reverse_gatt_client import (
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.17"
+BRIDGE_VERSION = "0.1.19"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -799,7 +799,9 @@ class BlePresenceObserver:
                 "iphone_session_mismatch": "waiting_for_app",
                 "iphone_connection_failed": "connecting",
                 "iphone_connection_retry": "connecting",
+                "iphone_signal_too_weak": "connecting",
                 "iphone_bond_reset": "bonding",
+                "existing_bond_resolved": "bonding",
                 "legacy_receiver_advertising": "waiting_for_app",
                 "windows_adapter_recovering": "waiting_for_app",
             }
@@ -863,11 +865,20 @@ class BlePresenceObserver:
                     progress_callback=publish_progress,
                 )
                 peer = await client.async_pair(link, timeout_seconds)
+            reused_bond = peer.transport == "existing_windows_bond"
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
-                "Encrypted claim accepted; capturing the private identity",
-                detail_code="iphone_claim_accepted",
+                (
+                    "Existing Windows bond recognized; capturing the private identity"
+                    if reused_bond
+                    else "Encrypted claim accepted; capturing the private identity"
+                ),
+                detail_code=(
+                    "existing_bond_resolved"
+                    if reused_bond
+                    else "iphone_claim_accepted"
+                ),
                 transport=peer.transport,
             )
             deadline = time.monotonic() + min(30, timeout_seconds)
@@ -892,6 +903,11 @@ class BlePresenceObserver:
                             ),
                             "captured_at": datetime.now(UTC).isoformat(),
                             "claim_verified": True,
+                            "recovery": (
+                                "session_scoped_existing_windows_bond"
+                                if reused_bond
+                                else "encrypted_gatt_claim"
+                            ),
                         },
                     )
                     result_payload = {
@@ -1031,7 +1047,19 @@ class BlePresenceObserver:
                         payload.get("detail_code") or "interactive_pairing"
                     )
                     message = str(payload.get("message") or detail_code)
+                    matched_address = normalize_address(
+                        str(payload.get("matched_address") or "")
+                    )
+                    session_scoped_advertisement = (
+                        payload.get("session_scoped_advertisement") is True
+                    )
                     reported_lease: dict[str, int] = {}
+                    try:
+                        reported_rssi = int(payload.get("rssi"))
+                    except (TypeError, ValueError):
+                        reported_rssi = None
+                    if reported_rssi is not None and -127 <= reported_rssi <= 20:
+                        reported_lease["rssi"] = reported_rssi
                     now_epoch = int(time.time())
                     now_monotonic = time.monotonic()
                     try:
@@ -1073,6 +1101,34 @@ class BlePresenceObserver:
                     if state == "progress" and update != last_update:
                         last_update = update
                         progress_callback(detail_code, message, **reported_lease)
+                    if (
+                        state == "progress"
+                        and detail_code
+                        in {
+                            "iphone_connection_retry",
+                            "iphone_connection_failed",
+                            "iphone_signal_too_weak",
+                        }
+                        and session_scoped_advertisement
+                        and matched_address
+                    ):
+                        record = select_irk_record_for_address(
+                            await asyncio.to_thread(read_windows_private_ble_irks),
+                            matched_address,
+                        )
+                        if record is not None:
+                            progress_callback(
+                                "existing_bond_resolved",
+                                "The QR-matched iPhone already has a valid Windows bond; reusing it",
+                            )
+                            return ReverseGattResult(
+                                address=matched_address,
+                                name=str(
+                                    payload.get("name")
+                                    or "Presence Pair iPhone"
+                                ),
+                                transport="existing_windows_bond",
+                            )
                     elif state == "success":
                         return ReverseGattResult(
                             address=str(payload.get("address") or ""),

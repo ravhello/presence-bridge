@@ -201,11 +201,33 @@ class PresenceBridgePanel extends HTMLElement {
         body: this.text("Presence Pair is searching for this Dell automatically. Keep the scanned-code screen open; no Windows confirmation is required.", "Presence Pair sta cercando automaticamente questo Dell. Tieni aperta la schermata del codice scansionato; su Windows non serve alcuna conferma."),
       };
     }
+    if (pairing.detail_code === "receiver_proximity_check") {
+      return {
+        tone: "",
+        title: this.text("Checking the distance on iPhone", "Controllo della distanza su iPhone"),
+        body: this.text("After scanning, Presence Pair shows the live Dell signal. Secure pairing stays stopped until the iPhone is close enough, then starts automatically.", "Dopo la scansione, Presence Pair mostra il segnale live del Dell. L'associazione protetta resta ferma finché l'iPhone non è abbastanza vicino, poi parte automaticamente."),
+      };
+    }
+    if (pairing.detail_code === "receiver_proximity_confirmed") {
+      return {
+        tone: "",
+        title: this.text("Distance confirmed", "Distanza confermata"),
+        body: this.text("The iPhone verified a stable receiver signal. The encrypted pairing is now starting automatically.", "L'iPhone ha verificato un segnale stabile del ricevitore. L'associazione cifrata sta partendo automaticamente."),
+      };
+    }
     if (pairing.detail_code === "windows_adapter_recovering") {
       return {
         tone: "warning",
         title: this.text("Bluetooth adapter recovery", "Ripristino adattatore Bluetooth"),
         body: this.text("Windows is reopening the adapter without restarting the computer. Keep Presence Pair open while it retries.", "Windows sta riaprendo l'adattatore senza riavviare il computer. Tieni Presence Pair aperta durante il nuovo tentativo."),
+      };
+    }
+    if (pairing.detail_code === "iphone_signal_too_weak") {
+      const rssi = pairing.rssi ? ` (${pairing.rssi} dBm)` : "";
+      return {
+        tone: "warning",
+        title: this.text("iPhone signal too weak", "Segnale iPhone troppo debole"),
+        body: this.text(`The Dell found the iPhone${rssi}, but the radio link is not stable enough for the one-time encrypted setup. Move the iPhone beside the Dell; this is not required after pairing.`, `Il Dell ha trovato l'iPhone${rssi}, ma il collegamento radio non e abbastanza stabile per la configurazione cifrata iniziale. Avvicina l'iPhone al Dell; dopo l'associazione non sara piu necessario.`),
       };
     }
     if (pairing.state === "timeout" || pairing.detail_code === "waiting_for_iphone_advertisement") {

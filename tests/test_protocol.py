@@ -18,6 +18,7 @@ from protocol import (
     acceptance_proof,
     claim_proof,
     pairing_service_uuid,
+    preflight_service_uuid,
     verify_claim,
 )
 
@@ -53,6 +54,13 @@ def test_pairing_service_uuid_is_stable_and_session_specific() -> None:
         secret=LINK.secret,
     )
     assert pairing_service_uuid(other) != pairing_service_uuid(LINK)
+    assert preflight_service_uuid(other) != preflight_service_uuid(LINK)
+
+
+def test_preflight_service_uuid_is_domain_separated() -> None:
+    """The Dell beacon must never look like the iPhone pairing service."""
+    assert preflight_service_uuid(LINK) == "9c04e9fc-aa19-5305-94a9-c33665d6ec7b"
+    assert preflight_service_uuid(LINK) != pairing_service_uuid(LINK)
 
 
 def test_acceptance_vector() -> None:

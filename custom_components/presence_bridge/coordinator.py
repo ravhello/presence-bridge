@@ -656,6 +656,7 @@ class PresenceBridgeCoordinator:
                 "advertisement_error",
                 "gatt_host",
                 "transport",
+                "rssi",
             )
             if payload.get(key) is not None
         }
