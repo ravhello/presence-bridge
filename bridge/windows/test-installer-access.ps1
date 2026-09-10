@@ -18,4 +18,11 @@ foreach ($writable in @($false, $true)) {
         }
     }
 }
+$installer = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'install.ps1') -Raw
+if ($installer -match '\$pairingRoot ''interactive-pairing-command.json''') {
+    throw 'SYSTEM command writes must never target an interactive-user-writable directory'
+}
+if ($installer -notmatch '\$InstallRoot ''interactive-pairing-command.json''') {
+    throw 'The pairing command must remain in the protected root'
+}
 Write-Output 'PASS: protected, localized-account-safe ACLs; pairing cannot replace SYSTEM code'

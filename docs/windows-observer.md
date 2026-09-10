@@ -33,7 +33,8 @@ observer keeps working before login for phones already enrolled. Do not enable
 automatic Windows login just for this integration.
 
 Code and configuration are readable by the selected pairing user but writable
-only by SYSTEM and Administrators. Mutable helper files live under
+only by SYSTEM and Administrators. SYSTEM command files remain in that protected
+root; the interactive user can only read them. Mutable helper results/logs live under
 `%ProgramData%\PresenceBridge\pairing`, with access restricted to those accounts.
 
 The observer is normally passive. During enrollment it pauses the presence

@@ -139,7 +139,7 @@ $config = [ordered]@{
     max_observations = 100
     app_pairing_enabled = $true
     interactive_pairing_task = $PairingTaskName
-    interactive_pairing_command_path = (Join-Path $pairingRoot 'interactive-pairing-command.json')
+    interactive_pairing_command_path = (Join-Path $InstallRoot 'interactive-pairing-command.json')
     interactive_pairing_result_path = (Join-Path $pairingRoot 'interactive-pairing-result.json')
     log_path = (Join-Path $InstallRoot 'presence-bridge.log')
 }
@@ -147,7 +147,7 @@ $configPath = Join-Path $InstallRoot 'config.json'
 $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding UTF8
 $mqttPassword = $null
 
-$pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $pairingRoot 'interactive-pairing-command.json'), (Join-Path $pairingRoot 'interactive-pairing-result.json'), (Join-Path $pairingRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
+$pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $InstallRoot 'interactive-pairing-command.json'), (Join-Path $pairingRoot 'interactive-pairing-result.json'), (Join-Path $pairingRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
 $pairingSettings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 16) `
