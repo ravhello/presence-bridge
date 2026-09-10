@@ -112,9 +112,41 @@ async def _run(command_path: Path, result_path: Path) -> int:
     command_text = command_path.read_text(encoding="utf-8-sig")
     command_path.unlink(missing_ok=True)
     raw = json.loads(command_text)
-    link = PairingLink.from_uri(str(raw["pairing_uri"]))
+    receipt = raw.get("transport") == "completion_beacon"
+    link = PairingLink.from_uri(str(raw["pairing_uri"]), allow_expired=receipt)
     if str(raw.get("session_id") or "") != link.session_id:
         raise ValueError("Interactive pairing command session mismatch")
+    if receipt:
+        # Only the SYSTEM observer can write this command, after HA's commit.
+        remaining = float(raw["attempt_expires_at"]) - time.time()
+        if not 0 < remaining <= 300:
+            raise ValueError("Completion receipt is outside the active attempt")
+        server = GattProximityServer(
+            ready_uuid=PREFLIGHT_READY_UUID, completion_receipt=True
+        )
+        try:
+            async with asyncio.timeout(remaining):
+                await server.async_start(link)
+                _status(
+                    result_path,
+                    link.session_id,
+                    "progress",
+                    detail_code="completion_beacon_advertising",
+                    message="Home Assistant verified and saved this iPhone",
+                )
+                await asyncio.sleep(
+                    min(20, max(0, float(raw["attempt_expires_at"]) - time.time()))
+                )
+        finally:
+            await server.async_stop()
+        _status(
+            result_path,
+            link.session_id,
+            "success",
+            detail_code="completion_beacon_sent",
+            message="Home Assistant completion receipt transmitted",
+        )
+        return 0
     gatt = raw["gatt"]
     transport = str(raw.get("transport") or "iphone_peripheral")
     timeout_seconds = max(60, min(600, int(raw.get("timeout_seconds", 180))))
@@ -195,9 +227,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
             )
             # Keep the previous direct path alive for already released app builds.
             # The QR-scoped beacon is a different service and cannot match this scan.
-            client_task = asyncio.create_task(
-                client.async_pair(link, timeout_seconds)
-            )
+            client_task = asyncio.create_task(client.async_pair(link, timeout_seconds))
             preflight_task = asyncio.create_task(
                 proximity_server.async_wait_until_ready(timeout_seconds)
             )

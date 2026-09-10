@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from protocol import (
     ProtocolError,
     acceptance_proof,
     claim_proof,
+    completion_service_uuid,
     pairing_service_uuid,
     preflight_service_uuid,
     verify_claim,
@@ -67,6 +69,22 @@ def test_acceptance_vector() -> None:
     """The iPhone can authenticate the receiver acknowledgement."""
     assert acceptance_proof(LINK) == "u1KQY_RD_yBH9VIx0CrrOe2nZ0zrkbuoa3iOBhH6QE4"
     assert acceptance_proof(LINK) != claim_proof(LINK)
+
+
+def test_completion_receipt_is_unique_and_domain_separated() -> None:
+    receipt = completion_service_uuid(LINK)
+    assert receipt == "51c91151-8fed-5ca8-a0ab-d892ef25eb6a"
+    assert receipt not in {pairing_service_uuid(LINK), preflight_service_uuid(LINK)}
+    for other in (
+        replace(LINK, session_id="different_session_1234"),
+        replace(LINK, observer_id="other_receiver"),
+        replace(LINK, expires_at=LINK.expires_at + 1),
+        replace(LINK, secret=b"\xff" * 32),
+    ):
+        assert completion_service_uuid(other) != receipt
+    assert (
+        PairingLink.from_uri(LINK.to_uri(), now=NOW + 999, allow_expired=True) == LINK
+    )
 
 
 def test_expired_invitation_is_rejected() -> None:

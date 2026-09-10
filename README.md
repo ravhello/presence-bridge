@@ -69,7 +69,7 @@ panel. Room selection uses the observer with the strongest fresh signal.
    connects and accepts automatically.
 
 The invitation is valid for ten minutes to scan. A scan completed in time starts
-a separate thirty-minute attempt on the iPhone. Once the selected receiver verifies
+a single five-minute attempt on the iPhone, including retries and HA verification. Once the selected receiver verifies
 that exact session, the invitation is consumed and cannot be reused. See
 [Pairing protocol](docs/protocol.md) for the wire format and threat model.
 

@@ -40,11 +40,21 @@ custom URL:
 presencepair://pair?v=2&sid=<session>&oid=<observer>&exp=<unix>&secret=<base64url>
 ```
 
-The invitation is valid for at most ten minutes. The app advertises only while
-that invitation is active and visible on screen. Seeing a generic Presence Pair
-advertisement does not consume or shorten another invitation; the separate
-thirty-minute completion window starts only after the exact session is read and
-verified.
+The invitation is valid for at most ten minutes to start. Scanning starts one
+five-minute app attempt, including proximity, retries and HA verification. The
+receiver starts its bounded attempt on the first exact QR-scoped advertisement.
+The completion phase inherits that deadline; it never renews it. Seeing a generic
+Presence Pair advertisement cannot consume or extend another invitation.
+
+After a matching live address is verified and its identity persisted, HA sends
+the receiver a non-retained MQTT `complete` command for the same active session.
+Only then does the receiver advertise a completion receipt for at most 20 seconds,
+within the remaining attempt budget. This also confirms reused Windows bonds
+whose GATT acknowledgement failed. The UUID is HMAC-SHA256(secret, UTF-8 of
+`presence-bridge-complete:v2\nsid\noid\nexp`), truncated to 16 bytes with the same
+UUID version/variant bits as the other services. The app scans only that UUID and
+accepts it only within its active attempt. It contains no identity or key.
+The encrypted GATT result means bond exchange accepted, not final HA completion.
 
 ## Claim and acknowledgement
 
@@ -102,7 +112,7 @@ and diagnostics.
   recover the QR secret from a claim.
 - A QR screenshot is sensitive during its ten-minute scan window. Cancel the
   session if the code is exposed. Scanning in time gives the iPhone one bounded
-  thirty-minute attempt; once the exact session is verified, the QR is consumed
+  five-minute attempt; once the exact session is verified, the QR is consumed
   and cannot start another attempt.
 - A different Presence Pair session is rejected before Windows attempts a bond.
 - The MQTT broker is trusted local infrastructure. Use a dedicated account,

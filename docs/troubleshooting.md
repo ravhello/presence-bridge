@@ -39,8 +39,10 @@ The app reports the stage that failed:
 Opening the HA panel or local QR helper in more than one tab does not create a
 second invitation. Every tab receives the same active code during its ten-minute
 start window; only **New code** explicitly replaces it. Once the receiver verifies
-the exact session, the QR is consumed and the active attempt gets a separate
-thirty-minute completion window.
+the exact session, the QR is consumed. The attempt has one five-minute deadline;
+neither retries nor the final verification restart it. A reused Windows bond may
+not trigger an iOS Pair prompt. HA sends a session-specific Bluetooth completion
+receipt after saving and verifying the identity, including on the existing-bond path.
 
 ## iOS asks to pair but HA reports no identity
 

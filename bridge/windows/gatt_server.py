@@ -399,7 +399,8 @@ class GattPairingServer:
 class GattProximityServer(GattPairingServer):
     """Advertise a QR-scoped plaintext gate before secure pairing starts."""
 
-    def __init__(self, *, ready_uuid: str) -> None:
+    def __init__(self, *, ready_uuid: str, completion_receipt: bool = False) -> None:
+        self._completion_receipt = completion_receipt
         super().__init__(
             service_uuid="00000000-0000-0000-0000-000000000000",
             session_uuid="00000000-0000-0000-0000-000000000000",
@@ -411,8 +412,14 @@ class GattProximityServer(GattPairingServer):
         """Publish the receiver beacon and its authenticated ready write."""
         if sys.platform != "win32":
             raise RuntimeError("The proximity preflight requires Windows")
-        link.validate()
-        self.service_uuid = preflight_service_uuid(link)
+        from protocol import completion_service_uuid
+
+        link.validate(allow_expired=self._completion_receipt)
+        self.service_uuid = (
+            completion_service_uuid(link)
+            if self._completion_receipt
+            else preflight_service_uuid(link)
+        )
         self._loop = asyncio.get_running_loop()
         self._link = link
         self._claim_future = self._loop.create_future()
@@ -455,8 +462,7 @@ class GattProximityServer(GattPairingServer):
             )
             if int(ready_result.error) != 0 or ready_result.characteristic is None:
                 raise RuntimeError(
-                    "Unable to create proximity characteristic: "
-                    f"{ready_result.error}"
+                    f"Unable to create proximity characteristic: {ready_result.error}"
                 )
             self._claim_characteristic = ready_result.characteristic
             self._claim_token = self._claim_characteristic.add_write_requested(
@@ -487,7 +493,10 @@ class GattProximityServer(GattPairingServer):
                             exc_info=True,
                         )
                     await asyncio.sleep(1)
-            LOGGER.info("QR-scoped Presence Pair proximity beacon is advertising")
+            LOGGER.info(
+                "QR-scoped Presence Pair %s beacon is advertising",
+                "completion" if self._completion_receipt else "proximity",
+            )
         except Exception:
             await self.async_stop()
             raise

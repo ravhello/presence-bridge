@@ -35,11 +35,9 @@ else:
 
 ProgressCallback = Callable[[str, str], None]
 LOGGER = logging.getLogger("presence_bridge.gatt")
-PAIRING_HANDOFF_GRACE_SECONDS = 1_800.0
-PAIRING_COMPLETION_GRACE_SECONDS = 1_800.0
-PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS = (
-    PAIRING_HANDOFF_GRACE_SECONDS + PAIRING_COMPLETION_GRACE_SECONDS + 15.0
-)
+PAIRING_HANDOFF_GRACE_SECONDS = 300.0
+PAIRING_COMPLETION_GRACE_SECONDS = 300.0
+PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS = 300.0
 MIN_PAIRING_RSSI_DBM = -82
 
 
@@ -142,10 +140,9 @@ class ReverseGattPairingClient:
     def _start_completion_lease(self) -> None:
         if self._completion_deadline is not None:
             return
-        self._completion_deadline = time.monotonic() + PAIRING_COMPLETION_GRACE_SECONDS
-        self._completion_expires_at = int(
-            time.time() + PAIRING_COMPLETION_GRACE_SECONDS
-        )
+        self._start_handoff_lease()
+        self._completion_deadline = self._handoff_deadline
+        self._completion_expires_at = self._handoff_expires_at
 
     def _progress(self, detail_code: str, message: str) -> None:
         self.detail_code = detail_code
@@ -801,7 +798,10 @@ class ReverseGattPairingClient:
                         ),
                         allow_bond_reset=(device_address not in reset_bond_addresses),
                     ),
-                    timeout=PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS,
+                    timeout=min(
+                        PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS,
+                        max(0.1, attempt_deadline - time.monotonic()),
+                    ),
                 )
             except BondResetRequiredError as err:
                 reset_bond_addresses.add(device_address)
@@ -859,7 +859,7 @@ class ReverseGattPairingClient:
         if self._completion_deadline is not None:
             message = (
                 "The QR was accepted in time, but secure pairing did not finish "
-                "within the thirty-minute completion window"
+                "within the five-minute pairing window"
             )
         elif self._handoff_deadline is not None:
             message = (

@@ -1006,7 +1006,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actual, result)
         self.assertEqual(reset_permissions, [True, False])
 
-    def test_completion_lease_is_separate_from_qr_handoff(self) -> None:
+    def test_completion_lease_never_extends_the_five_minute_attempt(self) -> None:
         client = ReverseGattPairingClient(
             service_uuid="service",
             session_uuid="session",
@@ -1018,10 +1018,15 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             patch("reverse_gatt_client.time.time", return_value=1_000.0),
         ):
             client.start_handoff_lease()
+        with (
+            patch("reverse_gatt_client.time.monotonic", return_value=390.0),
+            patch("reverse_gatt_client.time.time", return_value=1_290.0),
+        ):
             client._start_completion_lease()
 
-        self.assertEqual(client.lease_payload["attempt_expires_at"], 2_800)
-        self.assertEqual(client.lease_payload["completion_expires_at"], 2_800)
+        self.assertEqual(client.lease_payload["attempt_expires_at"], 1_300)
+        self.assertEqual(client.lease_payload["completion_expires_at"], 1_300)
+        self.assertEqual(client._completion_deadline, 400.0)
 
 
 if __name__ == "__main__":

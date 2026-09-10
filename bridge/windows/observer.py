@@ -36,15 +36,13 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from protocol import PairingLink, ProtocolError, b64url_decode
 from reverse_gatt_client import (
-    PAIRING_COMPLETION_GRACE_SECONDS,
-    PAIRING_HANDOFF_GRACE_SECONDS,
     ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.23"
+BRIDGE_VERSION = "0.1.24"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -204,8 +202,7 @@ def select_irk_record_for_address(
         cipher = Cipher(algorithms.AES(bytes.fromhex(irk)), modes.ECB())
         encryptor = cipher.encryptor()
         ciphertext = (
-            encryptor.update(b"\x00" * 13 + raw_address[:3])
-            + encryptor.finalize()
+            encryptor.update(b"\x00" * 13 + raw_address[:3]) + encryptor.finalize()
         )
         if hmac.compare_digest(ciphertext[13:], raw_address[3:]):
             matches.setdefault(irk, row)
@@ -619,6 +616,8 @@ class BlePresenceObserver:
         self._active_pairing_task: asyncio.Task[Any] | None = None
         self._active_pairing_action: str | None = None
         self._active_pairing_session_id: str | None = None
+        self._ha_pairing_committed = asyncio.Event()
+        self._app_attempt_expires_at: float | None = None
         self._scanner_pause_requested = asyncio.Event()
         self._scanner_stopped = asyncio.Event()
         self._scanner_stopped.set()
@@ -703,13 +702,20 @@ class BlePresenceObserver:
             payload = await self._pairing_commands.get()
             action = str(payload.get("action") or "").strip().lower()
             session_id = str(payload.get("session_id") or "").strip()
+            if action == "complete":
+                if (
+                    session_id == self._active_pairing_session_id
+                    and self._active_pairing_task is not None
+                    and not self._active_pairing_task.done()
+                ):
+                    self._ha_pairing_committed.set()
+                continue
             if action == "cancel":
                 if (
                     self._active_pairing_task is not None
                     and not self._active_pairing_task.done()
                     and (
-                        not session_id
-                        or session_id == self._active_pairing_session_id
+                        not session_id or session_id == self._active_pairing_session_id
                     )
                 ):
                     self._active_pairing_task.cancel()
@@ -768,6 +774,8 @@ class BlePresenceObserver:
                     await self._active_pairing_task
             self._active_pairing_action = action
             self._active_pairing_session_id = session_id
+            self._ha_pairing_committed.clear()
+            self._app_attempt_expires_at = None
             if action == "start_app_pairing":
                 self._active_pairing_task = asyncio.create_task(
                     self._run_app_pairing_session(
@@ -839,10 +847,17 @@ class BlePresenceObserver:
                 lease = dict(reported_lease)
                 if client is not None:
                     lease.update(client.lease_payload)
+                expires_at = lease.get("attempt_expires_at") or lease.get(
+                    "completion_expires_at"
+                )
+                if expires_at:
+                    bounded = min(float(expires_at), time.time() + 300)
+                    self._app_attempt_expires_at = min(
+                        self._app_attempt_expires_at or bounded, bounded
+                    )
                 public_detail_code = (
                     "iphone_candidate_unverified"
-                    if detail_code
-                    in {"iphone_advertisement_seen", "iphone_connected"}
+                    if detail_code in {"iphone_advertisement_seen", "iphone_connected"}
                     else detail_code
                 )
                 progress.update(
@@ -900,24 +915,16 @@ class BlePresenceObserver:
                     else "Encrypted claim accepted; capturing the private identity"
                 ),
                 detail_code=(
-                    "existing_bond_resolved"
-                    if reused_bond
-                    else "iphone_claim_accepted"
+                    "existing_bond_resolved" if reused_bond else "iphone_claim_accepted"
                 ),
                 transport=peer.transport,
             )
-            deadline = time.monotonic() + min(30, timeout_seconds)
+            remaining = (self._app_attempt_expires_at or time.time()) - time.time()
+            deadline = time.monotonic() + min(30, timeout_seconds, max(0, remaining))
             while time.monotonic() < deadline:
                 current = await asyncio.to_thread(read_windows_private_ble_irks)
                 new_records = select_new_irk_records(baseline, current)
-                record = (
-                    new_records[0]
-                    if len(new_records) == 1
-                    else select_irk_record_for_address(
-                        new_records or current,
-                        peer.address,
-                    )
-                )
+                record = select_irk_record_for_address(current, peer.address)
                 if record is not None:
                     encrypted = encrypt_pairing_result(
                         public_key,
@@ -929,6 +936,19 @@ class BlePresenceObserver:
                         "session_id": link.session_id,
                         "ciphertext": encrypted,
                     }
+                    heartbeat_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await heartbeat_task
+                    heartbeat_task = None
+                    self._publish_pairing_status(
+                        link.session_id,
+                        "identity_captured",
+                        "Identity captured; Home Assistant is verifying it",
+                        detail_code="identity_captured",
+                        transport=peer.transport,
+                    )
+                    self._resume_scanner_after_pairing()
+                    scanner_paused = False
                     self.mqtt.publish_bridge_json(
                         "pairing/result",
                         result_payload,
@@ -939,12 +959,20 @@ class BlePresenceObserver:
                         result_payload,
                         retain=False,
                     )
-                    self._publish_pairing_status(
-                        link.session_id,
-                        "identity_captured",
-                        "Identity captured; Home Assistant is verifying it",
-                        detail_code="identity_captured",
-                        transport=peer.transport,
+                    remaining = (
+                        self._app_attempt_expires_at or time.time()
+                    ) - time.time()
+                    await asyncio.wait_for(
+                        self._ha_pairing_committed.wait(), max(0, remaining)
+                    )
+                    await self._pause_scanner_for_pairing()
+                    scanner_paused = True
+                    await self._run_interactive_app_pairing(
+                        link,
+                        timeout_seconds,
+                        gatt,
+                        lambda *_a, **_k: None,
+                        completion_receipt=True,
                     )
                     return
                 if len(new_records) > 1:
@@ -991,6 +1019,8 @@ class BlePresenceObserver:
         timeout_seconds: int,
         gatt: dict[str, Any],
         progress_callback: Any,
+        *,
+        completion_receipt: bool = False,
     ) -> ReverseGattResult:
         """Delegate WinRT GATT to the logged-in user's Bluetooth session."""
         command_path = Path(self.config.interactive_pairing_command_path)
@@ -1007,7 +1037,10 @@ class BlePresenceObserver:
                     "session_id": link.session_id,
                     "pairing_uri": link.to_uri(),
                     "timeout_seconds": timeout_seconds,
-                    "transport": APP_PAIRING_TRANSPORT,
+                    "transport": "completion_beacon"
+                    if completion_receipt
+                    else APP_PAIRING_TRANSPORT,
+                    "attempt_expires_at": self._app_attempt_expires_at,
                     "gatt": gatt,
                 },
                 separators=(",", ":"),
@@ -1041,7 +1074,11 @@ class BlePresenceObserver:
             time.monotonic() + max(1, link.expires_at - int(time.time())),
         )
         last_update: tuple[str, str] | None = None
-        completion_started = False
+        attempt_deadline: float | None = (
+            self._app_attempt_expires_at if completion_receipt else None
+        )
+        if attempt_deadline is not None:
+            deadline = time.monotonic() + max(0, attempt_deadline - time.time())
         existing_bond_seen_at: float | None = None
         try:
             while True:
@@ -1086,48 +1123,36 @@ class BlePresenceObserver:
                         )
                     except (TypeError, ValueError):
                         completion_expires_at = 0
-                    if completion_expires_at > now_epoch:
-                        deadline = now_monotonic + completion_expires_at - now_epoch
-                        completion_started = True
-                        reported_lease["completion_expires_at"] = completion_expires_at
-                    elif attempt_expires_at > now_epoch and not completion_started:
-                        deadline = now_monotonic + attempt_expires_at - now_epoch
-                        reported_lease["attempt_expires_at"] = attempt_expires_at
-                    elif (
-                        detail_code
-                        in {
-                            "iphone_advertisement_seen",
-                            "iphone_candidate_unverified",
-                            "receiver_proximity_confirmed",
-                        }
-                        and not completion_started
-                    ):
-                        # The helper writes progress atomically and a faster
-                        # follow-up can replace the packet carrying its lease.
-                        # Reconstruct it here rather than falling back to the QR
-                        # deadline while a valid local attempt is in flight.
-                        deadline = now_monotonic + PAIRING_HANDOFF_GRACE_SECONDS
-                        reported_lease["attempt_expires_at"] = int(
-                            time.time() + PAIRING_HANDOFF_GRACE_SECONDS
+                    reported_deadlines = [
+                        value
+                        for value in (attempt_expires_at, completion_expires_at)
+                        if value > 0
+                    ]
+                    if reported_deadlines:
+                        bounded = min(*reported_deadlines, now_epoch + 300)
+                        attempt_deadline = min(attempt_deadline or bounded, bounded)
+                    elif attempt_deadline is None and detail_code in {
+                        "iphone_advertisement_seen",
+                        "iphone_candidate_unverified",
+                        "receiver_proximity_confirmed",
+                        "iphone_session_verified",
+                        "iphone_bond_ready",
+                        "iphone_bond_settling",
+                        "iphone_bond_reconnecting",
+                        "iphone_claim_received",
+                        "iphone_claim_accepted",
+                        "iphone_ack_deferred",
+                    }:
+                        attempt_deadline = now_epoch + 300
+                    if attempt_deadline is not None:
+                        deadline = min(
+                            deadline if self._app_attempt_expires_at else float("inf"),
+                            now_monotonic + attempt_deadline - now_epoch,
                         )
-                    elif (
-                        detail_code
-                        in {
-                            "iphone_session_verified",
-                            "iphone_bond_ready",
-                            "iphone_bond_settling",
-                            "iphone_bond_reconnecting",
-                            "iphone_claim_received",
-                            "iphone_claim_accepted",
-                            "iphone_ack_deferred",
-                        }
-                        and not completion_started
-                    ):
-                        deadline = now_monotonic + PAIRING_COMPLETION_GRACE_SECONDS
-                        completion_started = True
-                        reported_lease["completion_expires_at"] = int(
-                            time.time() + PAIRING_COMPLETION_GRACE_SECONDS
-                        )
+                        self._app_attempt_expires_at = attempt_deadline
+                        reported_lease["attempt_expires_at"] = int(attempt_deadline)
+                    if time.monotonic() >= deadline:
+                        break
                     update = (detail_code, message)
                     if state == "progress" and update != last_update:
                         last_update = update
@@ -1165,8 +1190,7 @@ class BlePresenceObserver:
                                 return ReverseGattResult(
                                     address=matched_address,
                                     name=str(
-                                        payload.get("name")
-                                        or "Presence Pair iPhone"
+                                        payload.get("name") or "Presence Pair iPhone"
                                     ),
                                     transport="existing_windows_bond",
                                 )
