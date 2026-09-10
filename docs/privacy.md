@@ -29,11 +29,31 @@ errors and counters, not IRKs or pairing secrets.
 
 - camera frames while the QR scanner is visible;
 - a short-lived pairing invitation held in memory;
-- the StoreKit purchase entitlement.
+- a bounded, in-memory technical pairing timeline;
+- a StoreKit purchase entitlement only in paid releases (not in the current
+  free compatibility release).
 
 The app does not create an account, collect analytics, access contacts, request
 location permission, or send data to a developer-operated server. Camera frames
 are not stored. Pairing invitations are discarded when they expire or complete.
+
+### Optional support reports
+
+The iPhone app's **Report a problem** action lets you describe an issue and
+preview an optional technical summary. It includes the iPhone hardware model,
+iOS/app versions, RSSI and up to 60 pairing steps with relative times and
+allowlisted error codes. It excludes pairing QR contents, secrets, IRKs,
+Bluetooth/network addresses, person names and receiver names. Raw Bluetooth
+error messages are not exported.
+
+Nothing is sent automatically. You may omit diagnostics, cancel, or send the
+report through your chosen email/share app. A message sent to
+`rikyravi@gmail.com` is received for support, together with its sender address,
+sender name and whatever text you choose to include. Review these before
+sending, and never attach QR codes, keys, credentials or full HA backups.
+These reports are used to investigate compatibility problems, not for tracking
+or advertising. You can request deletion of your support correspondence at
+the same address. Your chosen email/share provider has its own privacy policy.
 
 ## Recommended deployment
 

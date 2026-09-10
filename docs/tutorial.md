@@ -44,11 +44,16 @@ observer that receives the strongest fresh iPhone signal.
 
 Open **Presence Bridge** in the Home Assistant sidebar, select a person and the
 nearest observer, then choose **Create code**. Open Presence Pair on the iPhone,
-complete the one-time personal purchase, and scan the QR code. The iPhone then
+scan the QR code; the current compatibility release needs no purchase. The iPhone then
 becomes temporarily visible to the selected receiver, which connects and
 accepts automatically. If iOS asks, allow Presence Pair to use Bluetooth or tap
 Pair, then keep the app open until the green confirmation appears.
 There is nothing to click or approve on the Windows computer.
+
+**Report a problem** is available on the main iPhone screen and in Help. Add a
+description, inspect the optional diagnostics, then choose Compose email or
+Share report. Support is at `rikyravi@gmail.com`; sending always requires your
+action in your email/share app. Never include QR codes, keys or HA backups.
 
 If pairing does not finish, use the specific title and diagnostic code shown by
 the app to distinguish permission, discovery, connection, QR verification, and

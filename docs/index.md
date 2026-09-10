@@ -19,9 +19,10 @@ entities.
 **Windows observer** runs on an always-on computer with Bluetooth LE and sends
 fresh, bounded observations to the user's own MQTT broker.
 
-**Presence Pair for iPhone** performs the one-time encrypted association. It is
-a separate EUR 0.99 personal purchase with no subscription and no Family
-Sharing entitlement.
+**Presence Pair for iPhone** performs the one-time encrypted association. The
+current compatibility release is free, with no required purchase or
+subscription. It includes optional, previewable support reports. Availability
+on the public App Store remains subject to Apple review.
 
 ## Start here
 

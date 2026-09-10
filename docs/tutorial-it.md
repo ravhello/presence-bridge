@@ -44,7 +44,7 @@ ricevitore che sente meglio l'iPhone.
 
 Apri **Presence Bridge** dalla barra laterale di HA, scegli la persona e il
 ricevitore più vicino, quindi premi **Crea codice**. Apri Presence Pair
-sull'iPhone, completa l'acquisto personale una sola volta e inquadra il QR.
+sull'iPhone e inquadra il QR: la versione attuale e gratuita, senza acquisti.
 L'iPhone diventa temporaneamente visibile al ricevitore selezionato, che si
 connette e accetta automaticamente. Se iOS lo chiede, consenti a Presence Pair
 di usare il Bluetooth o tocca **Abbina**, poi attendi la conferma verde senza
@@ -84,3 +84,12 @@ servizio. Per rimuoverlo usa `uninstall.ps1` come amministratore.
 
 Per automazioni importanti combina questi dati con movimento, apertura porte,
 Wi-Fi e altri segnali: il Bluetooth da solo non garantisce la posizione esatta.
+
+## 7. Segnala un problema
+
+In Presence Pair tocca **Segnala un problema**, nella barra superiore o in
+**Aiuto**. Descrivi cosa e successo e controlla **Anteprima diagnostica**.
+Puoi escludere la diagnostica e scegliere **Prepara email** oppure **Condividi
+segnalazione**. Il destinatario dell'assistenza e `rikyravi@gmail.com`.
+L'invio non e automatico: controlla il mittente nella tua app email e conferma
+solo il messaggio che vuoi inviare. Non allegare QR, password o backup di HA.
