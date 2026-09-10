@@ -3,7 +3,7 @@
 [![Validate](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml/badge.svg)](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml)
 [![Release](https://img.shields.io/github/v/release/ravhello/presence-bridge?display_name=tag)](https://github.com/ravhello/presence-bridge/releases)
 
-Presence Bridge adds room-level iPhone presence to Home Assistant without a
+Presence Bridge adds an estimated iPhone presence and room to Home Assistant without a
 cloud account and without installing permanent Home Assistant credentials on
 the phone.
 
@@ -22,10 +22,15 @@ Bluetooth addresses, and MQTT credentials never leave the local network.
 ## Requirements
 
 - Home Assistant 2025.1 or newer with MQTT configured;
-- Windows 10/11 with a Bluetooth LE adapter that supports active scanning and
-  central connections;
+- a supported Windows installation with a Bluetooth LE adapter supporting
+  central connections and peripheral advertising;
 - Python 3.11 or newer on each Windows observer;
 - Presence Pair on an iPhone running iOS 17 or newer.
+
+During initial pairing, the configured Windows user must be signed in (a
+locked session is sufficient). Passive observation runs as SYSTEM at startup.
+Bluetooth strength estimates a receiver's room, not an exact position or a
+guaranteed person count. Validate your own adapter and rooms before automating.
 
 ## Install Home Assistant
 
@@ -53,8 +58,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 The installer asks for the observer name and MQTT credentials without placing
 the password in shell history. It installs a SYSTEM startup task for passive
-scanning plus a signed, on-demand Windows GATT host for enrollment, then
-restricts the configuration directory to SYSTEM and Administrators.
+scanning plus an on-demand pairing task in the signed-in user's session. The
+interactive task can write only its pairing data directory, not the code run
+by SYSTEM. No UAC or Windows confirmation is needed for each QR scan.
 
 Assign every fixed observer to its Home Assistant area in the Presence Bridge
 panel. Room selection uses the observer with the strongest fresh signal.
@@ -65,7 +71,7 @@ panel. Room selection uses the observer with the strongest fresh signal.
 2. Select the person and the nearest Windows observer.
 3. Tap **Create code**.
 4. Open the code with Presence Pair or scan it in the app.
-5. Keep the app open near the observer; accept Pair only if iOS asks. The Dell
+5. Keep the app open near the observer; accept Pair only if iOS asks. The receiver
    connects and accepts automatically.
 
 The invitation is valid for ten minutes to scan. A scan completed in time starts

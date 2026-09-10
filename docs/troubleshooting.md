@@ -19,7 +19,7 @@ permalink: /troubleshooting/
 - Keep the phone within a few metres of the selected observer.
 - Enable Bluetooth for Presence Pair in iOS Settings.
 - Ensure another pairing session is not already using that observer.
-- Follow the live step in HA. `waiting_for_iphone_advertisement` means the Dell
+- Follow the live step in HA. `waiting_for_iphone_advertisement` means the receiver
   is scanning but has not seen the app; `iphone_advertisement_seen` means radio
   discovery worked; `iphone_connected` means the GATT connection opened.
 
@@ -30,8 +30,8 @@ prompt must be accepted on the iPhone.
 The app reports the stage that failed:
 
 - `PP-BLE-*`: Bluetooth is off, unavailable, or not authorized on the iPhone.
-- `PP-SCAN-01`: the Dell never saw the iPhone advertisement.
-- `PP-CONNECT-01`: the Dell saw the iPhone but could not connect.
+- `PP-SCAN-01`: the receiver never saw the iPhone advertisement.
+- `PP-CONNECT-01`: the receiver saw the iPhone but could not connect.
 - `PP-VERIFY-01`: the receiver and QR session did not match.
 - `PP-BOND-01`: the encrypted Bluetooth bond was not completed.
 - `PP-SERVICE-01`: the Windows pairing service was incomplete.

@@ -87,7 +87,7 @@ The cross-language test vectors are:
 
 ```text
 sid             = abcdefghijklmnopQRSTUVWX
-oid             = dell_cucina
+oid             = living_room_pc
 exp             = 1800000180
 secret          = bytes 00 through 1f
 claim proof     = -q6gU_keDbd_kcgOXTfnolM0m3ke96HzM_b-z1uuXPk

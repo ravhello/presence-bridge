@@ -48,6 +48,12 @@ $PairingTaskUser = if ([string]::IsNullOrWhiteSpace($PairingTaskUser)) {
 if ([string]::IsNullOrWhiteSpace($PairingTaskUser)) {
     throw 'A Windows user must be logged in while Presence Bridge is installed.'
 }
+$pairingAccount = New-Object Security.Principal.NTAccount($PairingTaskUser)
+$pairingSid = $pairingAccount.Translate([Security.Principal.SecurityIdentifier])
+$activePairing = Get-ScheduledTask -TaskName $PairingTaskName -ErrorAction SilentlyContinue
+if ($activePairing -and $activePairing.State -eq 'Running') {
+    throw 'An iPhone pairing attempt is active. Finish or cancel it before updating Presence Bridge.'
+}
 $mqttPassword = ConvertTo-PlainText (Read-Host 'MQTT password' -AsSecureString)
 
 $python = Get-Command py.exe -ErrorAction SilentlyContinue
@@ -85,6 +91,11 @@ Get-AppxPackage -Name 'PresenceBridgeGattHost' -ErrorAction SilentlyContinue |
     Remove-AppxPackage -ErrorAction SilentlyContinue
 
 New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+. (Join-Path $sourceRoot 'installer-access.ps1')
+Set-Acl -LiteralPath $InstallRoot -AclObject (New-PresenceDirectoryAcl -PairingSid $pairingSid)
+$pairingRoot = Join-Path $InstallRoot 'pairing'
+New-Item -ItemType Directory -Path $pairingRoot -Force | Out-Null
+Set-Acl -LiteralPath $pairingRoot -AclObject (New-PresenceDirectoryAcl -PairingSid $pairingSid -Writable)
 $files = @(
     'adapter_info.py',
     'interactive_pairing_helper.py',
@@ -108,8 +119,8 @@ $venvPython = Join-Path $venv 'Scripts\python.exe'
 & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallRoot 'requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Unable to install Presence Bridge dependencies.' }
 $adapter = (& $venvPython (Join-Path $InstallRoot 'adapter_info.py') | ConvertFrom-Json)
-if (-not $adapter.adapter_found -or -not $adapter.is_low_energy_supported -or -not $adapter.is_central_role_supported) {
-    throw 'The Bluetooth adapter does not support the BLE central role required by Presence Bridge.'
+if (-not $adapter.adapter_found -or -not $adapter.is_low_energy_supported -or -not $adapter.is_central_role_supported -or -not $adapter.is_peripheral_role_supported) {
+    throw 'Presence Bridge requires BLE central and peripheral roles: scanning/connection plus proximity advertising. Use a compatible Windows Bluetooth adapter.'
 }
 
 $config = [ordered]@{
@@ -128,24 +139,15 @@ $config = [ordered]@{
     max_observations = 100
     app_pairing_enabled = $true
     interactive_pairing_task = $PairingTaskName
-    interactive_pairing_command_path = (Join-Path $InstallRoot 'interactive-pairing-command.json')
-    interactive_pairing_result_path = (Join-Path $InstallRoot 'interactive-pairing-result.json')
+    interactive_pairing_command_path = (Join-Path $pairingRoot 'interactive-pairing-command.json')
+    interactive_pairing_result_path = (Join-Path $pairingRoot 'interactive-pairing-result.json')
     log_path = (Join-Path $InstallRoot 'presence-bridge.log')
 }
 $configPath = Join-Path $InstallRoot 'config.json'
 $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding UTF8
 $mqttPassword = $null
 
-$acl = Get-Acl -LiteralPath $InstallRoot
-$acl.SetAccessRuleProtection($true, $false)
-$inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-$propagation = [Security.AccessControl.PropagationFlags]::None
-$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM', 'FullControl', $inherit, $propagation, 'Allow')))
-$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('BUILTIN\Administrators', 'FullControl', $inherit, $propagation, 'Allow')))
-$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($PairingTaskUser, 'Modify', $inherit, $propagation, 'Allow')))
-Set-Acl -LiteralPath $InstallRoot -AclObject $acl
-
-$pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $InstallRoot 'interactive-pairing-command.json'), (Join-Path $InstallRoot 'interactive-pairing-result.json'), (Join-Path $InstallRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
+$pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $pairingRoot 'interactive-pairing-command.json'), (Join-Path $pairingRoot 'interactive-pairing-result.json'), (Join-Path $pairingRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
 $pairingSettings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 16) `

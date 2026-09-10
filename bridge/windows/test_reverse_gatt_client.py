@@ -232,7 +232,9 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(progress[-1], "iphone_claim_accepted")
 
-    async def test_closed_ack_channel_after_bond_reconnects_without_unpairing(self) -> None:
+    async def test_closed_ack_channel_after_bond_reconnects_without_unpairing(
+        self,
+    ) -> None:
         link = PairingLink(
             session_id="abcdefghijklmnopQRSTUVWX",
             observer_id="dell_cucina",
@@ -486,7 +488,9 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(connect.await_args.kwargs["use_cached_services"])
         self.assertTrue(connect.await_args.kwargs["filter_services"])
 
-    async def test_confirmed_bond_pairs_before_encrypted_service_discovery(self) -> None:
+    async def test_confirmed_bond_pairs_before_encrypted_service_discovery(
+        self,
+    ) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
         connected = Mock(
             services=[

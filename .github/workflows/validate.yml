@@ -22,6 +22,7 @@ jobs:
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m pytest
+      - run: powershell -NoProfile -File bridge/windows/test-installer-access.ps1
 
   hassfest:
     runs-on: ubuntu-latest

@@ -2,6 +2,25 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.25 - release candidate
+
+- Prepare the free public compatibility release for Presence Pair build 214.
+- Check both BLE central and peripheral roles before accepting an adapter.
+- Limit the interactive pairing account to read-only access to SYSTEM code;
+  isolate writable exchange files in a private `pairing` directory.
+- Refuse receiver updates while an enrollment is running.
+- Validate the installation path before either uninstall mode and remove the
+  current interactive helper task as well as the observer task.
+- Correct installation prerequisites, signed-in-session requirements and
+  troubleshooting instructions; add a privacy-first bug-report form.
+
+## 0.1.24 - 2026-09-10
+
+- Bound an accepted iPhone scan to a single five-minute attempt, including
+  proximity, retries and final Home Assistant verification.
+- Confirm persisted Home Assistant identities with a session-authenticated BLE
+  receipt, including reuse of an existing Windows/iPhone bond.
+
 ## 0.1.23 - 2026-09-10
 
 - Preserve a pairing attempt for thirty minutes as soon as the iPhone confirms

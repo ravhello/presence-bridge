@@ -366,40 +366,42 @@ class ReverseGattPairingClient:
                     18.0,
                 )
             )
-        strategies.extend([
-            _ConnectionStrategy(
-                "native filtered service discovery",
-                detected_type,
-                True,
-                None,
-                False,
-                14.0,
-            ),
-            _ConnectionStrategy(
-                "fresh full service discovery",
-                detected_type,
-                False,
-                False,
-                False,
-                18.0,
-            ),
-            _ConnectionStrategy(
-                "fresh filtered service discovery",
-                detected_type,
-                True,
-                False,
-                False,
-                14.0,
-            ),
-            _ConnectionStrategy(
-                "cached full service discovery",
-                detected_type,
-                False,
-                True,
-                False,
-                10.0,
-            ),
-        ])
+        strategies.extend(
+            [
+                _ConnectionStrategy(
+                    "native filtered service discovery",
+                    detected_type,
+                    True,
+                    None,
+                    False,
+                    14.0,
+                ),
+                _ConnectionStrategy(
+                    "fresh full service discovery",
+                    detected_type,
+                    False,
+                    False,
+                    False,
+                    18.0,
+                ),
+                _ConnectionStrategy(
+                    "fresh filtered service discovery",
+                    detected_type,
+                    True,
+                    False,
+                    False,
+                    14.0,
+                ),
+                _ConnectionStrategy(
+                    "cached full service discovery",
+                    detected_type,
+                    False,
+                    True,
+                    False,
+                    10.0,
+                ),
+            ]
+        )
         if detected_type is not None:
             strategies.append(
                 _ConnectionStrategy(
