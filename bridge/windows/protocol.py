@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -81,7 +82,9 @@ class PairingLink:
         return f"{PAIRING_SCHEME}://{PAIRING_HOST}?{query}"
 
     @classmethod
-    def from_uri(cls, value: str, *, now: int | None = None) -> PairingLink:
+    def from_uri(
+        cls, value: str, *, now: int | None = None, allow_expired: bool = False
+    ) -> PairingLink:
         """Parse and validate a pairing URI."""
         parsed = urlparse(str(value or "").strip())
         if (
@@ -107,7 +110,7 @@ class PairingLink:
             )
         except (TypeError, ValueError) as err:
             raise ProtocolError("Invalid numeric field") from err
-        link.validate(now=now)
+        link.validate(now=now, allow_expired=allow_expired)
         return link
 
 
@@ -121,6 +124,43 @@ def claim_message(
         f"presence-bridge:v{PROTOCOL_VERSION}\n"
         f"{session_id}\n{observer_id}\n{int(expires_at)}"
     ).encode("ascii")
+
+
+def pairing_service_uuid(link: PairingLink) -> str:
+    """Derive a session-specific GATT service UUID from the QR secret."""
+    link.validate(allow_expired=True)
+    message = (f"presence-bridge-gatt:v{link.version}\n{link.session_id}").encode(
+        "ascii"
+    )
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
+
+
+def preflight_service_uuid(link: PairingLink) -> str:
+    """Derive the Dell proximity beacon UUID for one QR session."""
+    link.validate(allow_expired=True)
+    message = (f"presence-bridge-preflight:v{link.version}\n{link.session_id}").encode(
+        "ascii"
+    )
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
+
+
+def completion_service_uuid(link: PairingLink) -> str:
+    """Authenticate HA's persisted completion using a QR-specific BLE receipt."""
+    link.validate(allow_expired=True)
+    message = (
+        f"presence-bridge-complete:v{link.version}\n{link.session_id}\n"
+        f"{link.observer_id}\n{link.expires_at}"
+    ).encode("ascii")
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
 
 
 def claim_proof(link: PairingLink) -> str:

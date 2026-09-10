@@ -168,7 +168,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 "name": "presence-bridge-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "js_url": f"{STATIC_URL}/panel.js?v=3",
+                "js_url": f"{STATIC_URL}/panel.js?v=4",
             }
         },
         require_admin=True,

@@ -71,10 +71,6 @@ _ACTIVE_PAIRING_STATES = {
     "identity_captured",
     "verifying",
 }
-_PAIRING_HANDOFF_CODES = {
-    "iphone_advertisement_seen",
-    "iphone_connected",
-}
 _PAIRING_COMPLETION_CODES = {
     "iphone_session_verified",
     "iphone_bond_ready",
@@ -82,7 +78,13 @@ _PAIRING_COMPLETION_CODES = {
     "iphone_bond_reconnecting",
     "iphone_claim_received",
     "iphone_claim_accepted",
+    "iphone_ack_deferred",
     "identity_captured",
+}
+_PAIRING_HANDOFF_CODES = {
+    "iphone_advertisement_seen",
+    "iphone_candidate_unverified",
+    "receiver_proximity_confirmed",
 }
 _FORCED_RENEWAL_COALESCE_SECONDS = 30.0
 
@@ -129,7 +131,7 @@ def _bounded_lease_deadline(value: Any, now: int, maximum: int) -> int | None:
     except (TypeError, ValueError):
         return None
     if now - 5 < deadline <= now + maximum + 30:
-        return deadline
+        return min(deadline, now + maximum)
     return None
 
 
@@ -202,7 +204,7 @@ class PresenceBridgeCoordinator:
             self._unsubscribers.append(
                 await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
             )
-        self._periodic_task = self.hass.async_create_task(
+        self._periodic_task = self.hass.async_create_background_task(
             self._async_periodic_refresh(),
             f"{DOMAIN}_periodic_refresh",
         )
@@ -225,7 +227,7 @@ class PresenceBridgeCoordinator:
             session = self._pairing_session
             if session and _pairing_deadline(session) <= int(time.time()):
                 if session.get("completion_expires_at"):
-                    message = "Secure pairing stopped after five minutes without completion"
+                    message = "Pairing stopped after five minutes without completion"
                 elif session.get("attempt_expires_at"):
                     message = "The iPhone was found, but its QR session was not verified in time"
                 else:
@@ -500,10 +502,7 @@ class PresenceBridgeCoordinator:
             "private_key": private_key,
             "link": link,
         }
-        pairing_uri = (
-            f"{link.to_uri()}&"
-            f"{urlencode({'oname': selected.name[:100]})}"
-        )
+        pairing_uri = f"{link.to_uri()}&{urlencode({'oname': selected.name[:100]})}"
         qr_data_uri = await self.hass.async_add_executor_job(
             self._qr_data_uri,
             pairing_uri,
@@ -659,6 +658,7 @@ class PresenceBridgeCoordinator:
                 "advertisement_error",
                 "gatt_host",
                 "transport",
+                "rssi",
             )
             if payload.get(key) is not None
         }
@@ -674,11 +674,21 @@ class PresenceBridgeCoordinator:
             and not session.get("attempt_expires_at")
             and not session.get("completion_expires_at")
         ):
+            # Matching either QR-derived radio service proves that pairing
+            # started in time. Preserve the attempt even if an intermediate
+            # receiver status packet was overwritten before MQTT publication.
             attempt_expires_at = now + PAIRING_HANDOFF_TIMEOUT
         if attempt_expires_at is not None and not session.get("completion_expires_at"):
+            attempt_expires_at = min(
+                attempt_expires_at,
+                session.get("attempt_expires_at") or attempt_expires_at,
+            )
             session["attempt_expires_at"] = attempt_expires_at
             status_extra["attempt_expires_at"] = attempt_expires_at
             status_extra["handoff_started"] = True
+            status_extra["invitation_consumed"] = True
+            status_extra["pairing_uri"] = None
+            status_extra["qr_data_uri"] = None
 
         completion_expires_at = _bounded_lease_deadline(
             payload.get("completion_expires_at"),
@@ -690,8 +700,15 @@ class PresenceBridgeCoordinator:
             and detail_code in _PAIRING_COMPLETION_CODES
             and not session.get("completion_expires_at")
         ):
-            completion_expires_at = now + PAIRING_COMPLETION_TIMEOUT
+            completion_expires_at = (
+                session.get("attempt_expires_at") or now + PAIRING_COMPLETION_TIMEOUT
+            )
         if completion_expires_at is not None:
+            completion_expires_at = min(
+                completion_expires_at,
+                session.get("attempt_expires_at") or completion_expires_at,
+                session.get("completion_expires_at") or completion_expires_at,
+            )
             session["completion_expires_at"] = completion_expires_at
             status_extra.update(
                 {
@@ -718,6 +735,9 @@ class PresenceBridgeCoordinator:
                     "attempt_expires_at": session["attempt_expires_at"],
                     "effective_expires_at": session["attempt_expires_at"],
                     "handoff_started": True,
+                    "invitation_consumed": True,
+                    "pairing_uri": None,
+                    "qr_data_uri": None,
                 }
             )
         self._set_pairing_state(
@@ -767,8 +787,14 @@ class PresenceBridgeCoordinator:
 
     async def _async_process_pairing_result(self, payload: dict[str, Any]) -> None:
         session = self._pairing_session
-        if not session:
+        if (
+            not session
+            or session.get("result_processing")
+            or payload.get("session_id") != session["session_id"]
+            or payload.get("observer_id") != session["observer_id"]
+        ):
             return
+        session["result_processing"] = True
         try:
             ciphertext = base64.b64decode(
                 str(payload.get("ciphertext") or ""), validate=True
@@ -798,10 +824,21 @@ class PresenceBridgeCoordinator:
         )
         matches: list[tuple[ObserverState, int]] = []
         for _attempt in range(20):
+            if self._pairing_session is not session:
+                return
+            deadline = (
+                session.get("completion_expires_at")
+                or session.get("attempt_expires_at")
+                or session["expires_at"]
+            )
+            if time.time() >= deadline:
+                break
             matches = self._matches_for_irk(irk)
             if matches:
                 break
             await asyncio.sleep(3)
+        if self._pairing_session is not session:
+            return
         if not matches:
             self._set_pairing_state(
                 "error",
@@ -834,9 +871,22 @@ class PresenceBridgeCoordinator:
             "protocol": 2,
         }
         await self.store.async_save(self.memory)
+        if self._pairing_session is not session:
+            return
         self._cipher_cache.pop(irk, None)
         self._rebuild_identity_states()
         self._resolve_identities()
+        await mqtt.async_publish(
+            self.hass,
+            f"{TOPIC_ROOT}/{session['observer_id']}/pairing/command",
+            json.dumps(
+                {"schema": 2, "action": "complete", "session_id": session["session_id"]}
+            ),
+            qos=1,
+            retain=False,
+        )
+        if self._pairing_session is not session:
+            return
         self._set_pairing_state(
             "complete",
             f"{session['person_name']}'s iPhone is paired and verified",

@@ -42,6 +42,51 @@ def link() -> PairingLink:
     )
 
 
+def test_completion_beacon_requires_an_unexpired_attempt(tmp_path, monkeypatch):
+    payload = command(link(), transport="completion_beacon")
+    payload["attempt_expires_at"] = time.time() - 1
+    command_path = tmp_path / "command.json"
+    command_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="outside the active attempt"):
+        asyncio.run(helper._run(command_path, tmp_path / "result.json"))
+
+
+def test_completion_receipt_can_finish_after_qr_expiry(tmp_path, monkeypatch):
+    stopped = []
+
+    class Beacon:
+        def __init__(self, **kwargs):
+            assert kwargs["completion_receipt"] is True
+
+        async def async_start(self, _link):
+            assert _link.expires_at < time.time()
+
+        async def async_stop(self):
+            stopped.append(True)
+
+    async def no_wait(_seconds):
+        pass
+
+    expired = PairingLink(
+        session_id="abcdefghijklmnopQRSTUVWX",
+        observer_id="dell_cucina",
+        expires_at=int(time.time()) - 1,
+        secret=bytes(range(32)),
+    )
+    payload = command(expired, transport="completion_beacon")
+    payload["attempt_expires_at"] = time.time() + 60
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(helper, "GattProximityServer", Beacon)
+    monkeypatch.setattr(helper.asyncio, "sleep", no_wait)
+    assert asyncio.run(helper._run(command_path, result_path)) == 0
+    assert stopped == [True]
+    assert (
+        json.loads(result_path.read_text())["detail_code"] == "completion_beacon_sent"
+    )
+
+
 def test_legacy_transport_can_win_automatic_pairing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -87,19 +132,31 @@ def test_legacy_transport_can_win_automatic_pairing(
     assert not command_path.exists()
 
 
-def test_current_transport_scans_without_starting_legacy_server(
+def test_current_transport_waits_for_proximity_then_pairs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    proximity_stopped = asyncio.Event()
+    status_updates: list[dict[str, object]] = []
+    original_status = helper._status
+
+    def record_status(*args: object, **kwargs: object) -> None:
+        status_updates.append(dict(kwargs))
+        original_status(*args, **kwargs)
+
     class Reverse:
         detail_code = "iphone_claim_accepted"
 
         def __init__(self, **_kwargs: object) -> None:
-            pass
+            self.lease_payload: dict[str, int] = {}
+
+        def start_handoff_lease(self) -> None:
+            self.lease_payload["attempt_expires_at"] = int(time.time()) + 1_800
 
         async def async_pair(
             self, _link: PairingLink, _timeout: int
         ) -> ReverseGattResult:
+            await proximity_stopped.wait()
             return ReverseGattResult(
                 address="AA:BB:CC:DD:EE:FF",
                 name="Presence Pair",
@@ -109,16 +166,138 @@ def test_current_transport_scans_without_starting_legacy_server(
         def __init__(self, **_kwargs: object) -> None:
             raise AssertionError("legacy server must not reserve the adapter")
 
+    class Proximity:
+        stopped = False
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            return None
+
+        async def async_wait_until_ready(self, _timeout: int) -> dict[str, bool]:
+            return {"claim_verified": True}
+
+        async def async_stop(self) -> None:
+            self.stopped = True
+            proximity_stopped.set()
+
     monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
     monkeypatch.setattr(helper, "GattPairingServer", Legacy)
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    monkeypatch.setattr(helper, "_status", record_status)
     command_path = tmp_path / "command.json"
     result_path = tmp_path / "result.json"
     command_path.write_text(json.dumps(command(link())), encoding="utf-8")
 
-    assert asyncio.run(helper._run(command_path, result_path)) == 0
+    assert (
+        asyncio.run(asyncio.wait_for(helper._run(command_path, result_path), timeout=2))
+        == 0
+    )
     result = json.loads(result_path.read_text(encoding="utf-8"))
     assert result["state"] == "success"
     assert result["transport"] == "iphone_peripheral"
+    assert proximity_stopped.is_set()
+    proximity_confirmed = next(
+        update
+        for update in status_updates
+        if update.get("detail_code") == "receiver_proximity_confirmed"
+    )
+    assert int(proximity_confirmed["attempt_expires_at"]) > int(time.time())
+
+
+def test_current_transport_keeps_direct_path_for_existing_app_builds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proximity_stopped = asyncio.Event()
+
+    class Reverse:
+        detail_code = "iphone_claim_accepted"
+
+        def __init__(self, **kwargs: object) -> None:
+            self.progress_callback = kwargs["progress_callback"]
+            self.lease_payload: dict[str, object] = {}
+
+        def start_handoff_lease(self) -> None:
+            self.lease_payload["attempt_expires_at"] = int(time.time()) + 1_800
+
+        async def async_pair(
+            self, _link: PairingLink, _timeout: int
+        ) -> ReverseGattResult:
+            self.progress_callback(
+                "iphone_advertisement_seen",
+                "iPhone found",
+            )
+            await proximity_stopped.wait()
+            return ReverseGattResult(
+                address="AA:BB:CC:DD:EE:FF",
+                name="Presence Pair",
+            )
+
+    class Proximity:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            return None
+
+        async def async_wait_until_ready(self, _timeout: int) -> dict[str, bool]:
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled proximity task resumed")
+
+        async def async_stop(self) -> None:
+            proximity_stopped.set()
+
+    monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(command(link())), encoding="utf-8")
+
+    assert (
+        asyncio.run(asyncio.wait_for(helper._run(command_path, result_path), timeout=2))
+        == 0
+    )
+    assert proximity_stopped.is_set()
+
+
+def test_proximity_provider_is_recreated_after_delayed_windows_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    stopped = 0
+
+    class Proximity:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def async_start(self, _link: PairingLink) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise RuntimeError("adapter still releasing")
+
+        async def async_stop(self) -> None:
+            nonlocal stopped
+            stopped += 1
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(helper, "GattProximityServer", Proximity)
+    monkeypatch.setattr(helper.asyncio, "sleep", no_sleep)
+    result_path = tmp_path / "result.json"
+
+    server = asyncio.run(helper._start_proximity_server(link(), result_path))
+
+    assert isinstance(server, Proximity)
+    assert attempts == 3
+    assert stopped == 2
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["state"] == "progress"
+    assert result["detail_code"] == "windows_adapter_recovering"
 
 
 def test_command_secret_is_removed_before_parsing(tmp_path: Path) -> None:
@@ -153,7 +332,5 @@ def test_result_write_retries_transient_windows_lock(
     helper._write_json(result_path, {"state": "progress"})
 
     assert attempts == 3
-    assert json.loads(result_path.read_text(encoding="utf-8")) == {
-        "state": "progress"
-    }
+    assert json.loads(result_path.read_text(encoding="utf-8")) == {"state": "progress"}
     assert not list(tmp_path.glob("*.tmp"))

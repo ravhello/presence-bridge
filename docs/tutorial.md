@@ -10,6 +10,10 @@ permalink: /tutorial/
 You need Home Assistant 2025.1 or newer, an MQTT broker already connected to
 Home Assistant, an always-on Windows 10/11 computer with Bluetooth LE, and an
 iPhone running iOS 17 or newer. Keep each observer computer in a fixed place.
+The adapter must support both BLE central connections and peripheral
+advertising. During enrollment the configured Windows user must be signed in;
+a locked session is sufficient. Passive observation runs as SYSTEM before
+login. Use a Windows version receiving security updates.
 
 ## 2. Install the free integration
 
@@ -57,15 +61,16 @@ action in your email/share app. Never include QR codes, keys or HA backups.
 
 If pairing does not finish, use the specific title and diagnostic code shown by
 the app to distinguish permission, discovery, connection, QR verification, and
-encrypted-bond failures. The HA panel reports whether the Dell is searching,
+encrypted-bond failures. The HA panel reports whether the receiver is searching,
 has found the iPhone, or has opened the connection. **New code** restarts the whole attempt
 without a manual step on the computer.
 
 The code is valid for ten minutes to scan. A scan completed in time starts a
-separate five-minute attempt on the iPhone that is no longer interrupted by the
+single five-minute attempt on the iPhone that is no longer interrupted by the
 original expiry. As soon as the receiver verifies that exact session, the QR is
 consumed and cannot be reused. It contains no permanent Home Assistant password,
-and the app does not need to remain open after pairing.
+and the app does not need to remain open after pairing. The same five minutes
+cover proximity, retries, bond reuse and HA verification; no phase resets the timer.
 
 ## 5. Verify the result
 

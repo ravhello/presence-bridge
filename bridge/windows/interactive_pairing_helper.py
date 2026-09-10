@@ -9,15 +9,19 @@ import json
 import logging
 import os
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from gatt_server import GattPairingServer
+from gatt_server import GattPairingServer, GattProximityServer
 from protocol import PairingLink
 from reverse_gatt_client import ReverseGattPairingClient, ReverseGattResult
 
 LOGGER = logging.getLogger("presence_bridge.interactive_pairing")
+PREFLIGHT_READY_UUID = "b6201f73-89f1-4c2b-981f-7ccade5a52d4"
+PROXIMITY_PROVIDER_START_ATTEMPTS = 5
+PROXIMITY_PROVIDER_RETRY_SECONDS = 2.0
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -64,19 +68,103 @@ def _status(
     LOGGER.info("%s: %s", detail_code, message)
 
 
+async def _start_proximity_server(
+    link: PairingLink,
+    result_path: Path,
+) -> GattProximityServer:
+    """Start a fresh WinRT provider, tolerating delayed adapter release."""
+    last_error: Exception | None = None
+    for attempt in range(1, PROXIMITY_PROVIDER_START_ATTEMPTS + 1):
+        server = GattProximityServer(ready_uuid=PREFLIGHT_READY_UUID)
+        try:
+            await server.async_start(link)
+            return server
+        except asyncio.CancelledError:
+            await server.async_stop()
+            raise
+        except Exception as error:
+            last_error = error
+            await server.async_stop()
+            if attempt >= PROXIMITY_PROVIDER_START_ATTEMPTS:
+                raise
+            _status(
+                result_path,
+                link.session_id,
+                "progress",
+                detail_code="windows_adapter_recovering",
+                message=(
+                    "Windows is releasing the previous Bluetooth session; "
+                    "retrying automatically"
+                ),
+                retry_attempt=attempt,
+            )
+            LOGGER.warning(
+                "Proximity provider start %s/%s failed; creating a fresh provider",
+                attempt,
+                PROXIMITY_PROVIDER_START_ATTEMPTS,
+            )
+            await asyncio.sleep(PROXIMITY_PROVIDER_RETRY_SECONDS)
+    assert last_error is not None
+    raise last_error
+
+
 async def _run(command_path: Path, result_path: Path) -> int:
     command_text = command_path.read_text(encoding="utf-8-sig")
     command_path.unlink(missing_ok=True)
     raw = json.loads(command_text)
-    link = PairingLink.from_uri(str(raw["pairing_uri"]))
+    receipt = raw.get("transport") == "completion_beacon"
+    link = PairingLink.from_uri(str(raw["pairing_uri"]), allow_expired=receipt)
     if str(raw.get("session_id") or "") != link.session_id:
         raise ValueError("Interactive pairing command session mismatch")
+    if receipt:
+        # Only the SYSTEM observer can write this command, after HA's commit.
+        remaining = float(raw["attempt_expires_at"]) - time.time()
+        if not 0 < remaining <= 300:
+            raise ValueError("Completion receipt is outside the active attempt")
+        server = GattProximityServer(
+            ready_uuid=PREFLIGHT_READY_UUID, completion_receipt=True
+        )
+        try:
+            async with asyncio.timeout(remaining):
+                await server.async_start(link)
+                _status(
+                    result_path,
+                    link.session_id,
+                    "progress",
+                    detail_code="completion_beacon_advertising",
+                    message="Home Assistant verified and saved this iPhone",
+                )
+                await asyncio.sleep(
+                    min(20, max(0, float(raw["attempt_expires_at"]) - time.time()))
+                )
+        finally:
+            await server.async_stop()
+        _status(
+            result_path,
+            link.session_id,
+            "success",
+            detail_code="completion_beacon_sent",
+            message="Home Assistant completion receipt transmitted",
+        )
+        return 0
     gatt = raw["gatt"]
     transport = str(raw.get("transport") or "iphone_peripheral")
     timeout_seconds = max(60, min(600, int(raw.get("timeout_seconds", 180))))
     client: ReverseGattPairingClient | None = None
+    client_task: asyncio.Task[ReverseGattResult] | None = None
+    preflight_task: asyncio.Task[dict[str, Any]] | None = None
+    iphone_seen_task: asyncio.Task[bool] | None = None
+    iphone_seen = asyncio.Event()
+    proximity_waiting = False
 
     def progress(detail_code: str, message: str) -> None:
+        if detail_code == "iphone_advertisement_seen":
+            iphone_seen.set()
+        if proximity_waiting and detail_code in {
+            "waiting_for_iphone_advertisement",
+            "windows_adapter_recovering",
+        }:
+            return
         _status(
             result_path,
             link.session_id,
@@ -94,6 +182,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
         message="The logged-in Windows Bluetooth session is ready for the iPhone",
     )
     server: GattPairingServer | None = None
+    proximity_server: GattProximityServer | None = None
     try:
         if transport == "windows_peripheral":
             server = GattPairingServer(
@@ -124,7 +213,55 @@ async def _run(command_path: Path, result_path: Path) -> int:
                 result_uuid=str(gatt["result_uuid"]),
                 progress_callback=progress,
             )
-            peer = await client.async_pair(link, timeout_seconds)
+            proximity_server = await _start_proximity_server(link, result_path)
+            proximity_waiting = True
+            _status(
+                result_path,
+                link.session_id,
+                "progress",
+                detail_code="receiver_proximity_check",
+                message=(
+                    "Receiver beacon ready; the iPhone will start pairing "
+                    "automatically when the signal is strong enough"
+                ),
+            )
+            # Keep the previous direct path alive for already released app builds.
+            # The QR-scoped beacon is a different service and cannot match this scan.
+            client_task = asyncio.create_task(client.async_pair(link, timeout_seconds))
+            preflight_task = asyncio.create_task(
+                proximity_server.async_wait_until_ready(timeout_seconds)
+            )
+            iphone_seen_task = asyncio.create_task(iphone_seen.wait())
+            done, _pending = await asyncio.wait(
+                {client_task, preflight_task, iphone_seen_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if client_task in done:
+                peer = await client_task
+            else:
+                if preflight_task in done:
+                    await preflight_task
+                else:
+                    await iphone_seen_task
+                # The phone has either read the QR-derived proximity service or
+                # started advertising the exact session service. From this point
+                # QR expiry must not interrupt the WinRT role switch.
+                client.start_handoff_lease()
+                proximity_waiting = False
+                _status(
+                    result_path,
+                    link.session_id,
+                    "progress",
+                    detail_code="receiver_proximity_confirmed",
+                    message=(
+                        "iPhone is close enough; secure pairing is starting "
+                        "automatically"
+                    ),
+                    **client.lease_payload,
+                )
+                await proximity_server.async_stop()
+                proximity_server = None
+                peer = await client_task
         else:
             raise ValueError(f"Unsupported pairing transport: {transport}")
     except BaseException as error:
@@ -139,9 +276,17 @@ async def _run(command_path: Path, result_path: Path) -> int:
             "error",
             detail_code=detail_code,
             message=f"{type(error).__name__}: {str(error).strip()}"[:300],
+            **(client.lease_payload if client is not None else {}),
         )
         raise
     finally:
+        for task in (iphone_seen_task, preflight_task, client_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with suppress(BaseException):
+                    await task
+        if proximity_server is not None:
+            await proximity_server.async_stop()
         if server is not None:
             await server.async_stop()
 

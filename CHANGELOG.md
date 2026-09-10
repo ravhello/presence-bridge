@@ -2,11 +2,74 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.25 - release candidate
+
+- Prepare the free public compatibility release for Presence Pair build 214.
+- Check both BLE central and peripheral roles before accepting an adapter.
+- Limit the interactive pairing account to read-only access to SYSTEM code;
+  isolate writable exchange files in a private `pairing` directory.
+- Refuse receiver updates while an enrollment is running.
+- Validate the installation path before either uninstall mode and remove the
+  current interactive helper task as well as the observer task.
+- Correct installation prerequisites, signed-in-session requirements and
+  troubleshooting instructions; add a privacy-first bug-report form.
+
+## 0.1.24 - 2026-09-10
+
+- Bound an accepted iPhone scan to a single five-minute attempt, including
+  proximity, retries and final Home Assistant verification.
+- Confirm persisted Home Assistant identities with a session-authenticated BLE
+  receipt, including reuse of an existing Windows/iPhone bond.
+
+## 0.1.23 - 2026-09-10
+
+- Preserve a pairing attempt for thirty minutes as soon as the iPhone confirms
+  the QR-derived proximity beacon, even when that happens seconds before the
+  original invitation expires.
+- Propagate the handoff lease through the Windows helper, observer, MQTT state,
+  and Home Assistant UI so an in-flight connection cannot be cancelled by a
+  missed intermediate status update.
+
+## 0.1.22 - 2026-09-09
+
+- Stop the QR proximity beacon as soon as the iPhone's final session
+  advertisement is visible, avoiding a preliminary Bluetooth bond and duplicate
+  iOS pairing prompts.
+
+## 0.1.21 - 2026-09-09
+
+- Recreate the Windows proximity GATT provider when a freshly renewed QR races
+  with delayed Bluetooth adapter cleanup, keeping the same session alive while
+  the receiver retries automatically.
+
+## 0.1.20 - 2026-09-09
+
+- Keep the encrypted Home Assistant identity payload below the RSA-OAEP limit
+  after an existing Windows bond is recovered.
+- Let the post-bond GATT channel settle and reconnect with the confirmed bond
+  before falling back to local IRK completion.
+- Report an explicit payload-capacity error instead of the opaque
+  `Encryption failed` exception.
+
+## 0.1.19 - 2026-09-09
+
+- Advertise a QR-scoped Dell proximity service before secure iPhone pairing.
+- Let Presence Pair measure the receiver signal and delay pairing until the
+  phone is close enough, while preserving the direct path for existing builds.
+- Start the encrypted exchange automatically after authenticated proximity
+  confirmation, without requiring a Windows prompt.
+
+## 0.1.18 - 2026-09-09
+
+- Reuse an existing QR-matched Windows BLE bond before requesting another pairing.
+- Preserve an accepted QR attempt while waiting for a stable local radio link.
+- Report weak iPhone RSSI explicitly instead of repeatedly opening an unusable GATT route.
+
 ## 0.1.17 - 2026-09-07
 
 - Keep a QR code valid for ten minutes only as an invitation to start pairing.
   Once the matching iPhone session is read, consume the invitation and grant a
-  separate five-minute window so its original expiry cannot interrupt the bond.
+  separate thirty-minute window so its original expiry cannot interrupt the bond.
 - Show separate start, handoff, and completion countdowns in Home Assistant,
   and remove the QR as soon as the authenticated session takes ownership.
 

@@ -36,6 +36,7 @@ BOND_READY_STAGES = {
     "iphone_bond_ready",
     "iphone_bond_settling",
     "iphone_bond_reconnecting",
+    "iphone_ack_deferred",
 }
 
 

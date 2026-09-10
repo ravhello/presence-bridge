@@ -10,6 +10,10 @@ permalink: /tutorial-it/
 Servono Home Assistant 2025.1 o successivo, un broker MQTT già collegato a HA,
 un PC Windows 10/11 sempre acceso con Bluetooth LE e un iPhone con iOS 17 o
 successivo. Il PC deve rimanere in una posizione fissa.
+L'adattatore deve supportare sia connessioni BLE centrali sia advertising
+periferico. Durante l'abbinamento l'utente Windows configurato deve avere una
+sessione aperta, anche bloccata; la scansione successiva funziona come servizio
+SYSTEM anche prima del login. Non tutti gli adattatori sono stati collaudati.
 
 ## 2. Installa l'integrazione gratuita
 
@@ -48,18 +52,20 @@ sull'iPhone e inquadra il QR: la versione attuale e gratuita, senza acquisti.
 L'iPhone diventa temporaneamente visibile al ricevitore selezionato, che si
 connette e accetta automaticamente. Se iOS lo chiede, consenti a Presence Pair
 di usare il Bluetooth o tocca **Abbina**, poi attendi la conferma verde senza
-chiudere l'app. Sul Dell non devi premere o confermare nulla.
+chiudere l'app. Sul ricevitore Windows non devi premere o confermare nulla.
 
 Se l'associazione non termina, leggi il titolo e il codice diagnostico mostrati
 dall'app: distinguono permesso Bluetooth, ricevitore non trovato, connessione,
-verifica del QR e legame cifrato. La plancia HA indica se il Dell sta cercando,
+verifica del QR e legame cifrato. La plancia HA indica se il ricevitore sta cercando,
 ha trovato l'iPhone o ha aperto la connessione; **Nuovo codice** riavvia l'intero
 tentativo senza passaggi manuali sul PC.
 
 Il codice e valido per dieci minuti per essere scansionato. Una scansione
-eseguita in tempo avvia sull'iPhone un tentativo separato di cinque minuti, che
+eseguita in tempo avvia sull'iPhone un unico tentativo di cinque minuti, che
 non viene interrotto dalla scadenza originaria. Appena il ricevitore verifica
 quella precisa sessione, il QR viene consumato e non puo piu essere riutilizzato.
+I cinque minuti comprendono avvicinamento, tentativi, riuso del legame e verifica HA.
+La conferma finale appare solo dopo che HA ha salvato e verificato l'identita.
 Non contiene password permanenti e, dopo l'associazione, l'app non deve restare
 aperta.
 

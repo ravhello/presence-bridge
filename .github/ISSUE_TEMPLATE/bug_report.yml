@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible integration or receiver problem without private pairing data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Never paste QR codes, invitation links, IRKs,
+        Bluetooth/MAC addresses, credentials, HA backups or unfiltered logs.
+        For an app report, use Presence Pair > Report a problem and review the
+        optional diagnostics before privately emailing support.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I have removed pairing secrets and personal identifiers.
+          required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: App build, iOS, Home Assistant, integration, receiver and Windows versions.
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter
+      description: Model and driver version only. No serial numbers or addresses.
+  - type: dropdown
+    id: situation
+    attributes:
+      label: Pairing situation
+      options:
+        - First pairing
+        - Previously paired on both devices
+        - Pairing removed on one device only
+        - Presence after successful pairing
+        - Other
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result and actual result
+      description: Include whether the Windows pairing user was signed in and any PP error code.
+    validations:
+      required: true

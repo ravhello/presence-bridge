@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -14,10 +15,14 @@ from observer import (
     ObserverConfig,
     encrypt_pairing_result,
     normalize_address,
+    pairing_ack_fallback_ready,
     scan_session_is_stale,
     select_irk_record_for_address,
     select_new_irk_records,
+    verified_app_identity_payload,
 )
+from protocol import PairingLink
+from reverse_gatt_client import ReverseGattResult
 
 
 class BlePresenceObserverTest(unittest.TestCase):
@@ -38,6 +43,11 @@ class BlePresenceObserverTest(unittest.TestCase):
         )
         self.assertFalse(scan_session_is_stale(100.0, 180.0, 250.0, 120.0))
         self.assertTrue(scan_session_is_stale(100.0, 180.0, 300.0, 120.0))
+
+    def test_existing_bond_fallback_waits_for_iphone_ack_reconnect(self) -> None:
+        self.assertFalse(pairing_ack_fallback_ready(None, 100.0))
+        self.assertFalse(pairing_ack_fallback_ready(100.0, 129.9))
+        self.assertTrue(pairing_ack_fallback_ready(100.0, 130.0))
 
     def test_new_irk_records_are_unique_and_exclude_the_baseline(self) -> None:
         baseline = [{"irk": "00" * 16, "registry_leaf": "AABBCCDDEEFF"}]
@@ -84,6 +94,37 @@ class BlePresenceObserverTest(unittest.TestCase):
         )
         self.assertEqual(__import__("json").loads(plaintext)["irk"], "AA" * 16)
 
+    def test_verified_app_identity_omits_oversized_diagnostics(self) -> None:
+        payload = verified_app_identity_payload(
+            {
+                "irk": "AA" * 16,
+                "registry_leaf": "AABBCCDDEEFF",
+                "recovery": "session_scoped_existing_windows_bond",
+            }
+        )
+
+        self.assertEqual(
+            payload,
+            {"irk": "AA" * 16, "claim_verified": True},
+        )
+        self.assertLessEqual(
+            len(__import__("json").dumps(payload, separators=(",", ":")).encode()),
+            190,
+        )
+
+    def test_pairing_result_reports_rsa_oaep_capacity(self) -> None:
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_der = private_key.public_key().public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        with self.assertRaisesRegex(ValueError, "too large for RSA-OAEP"):
+            encrypt_pairing_result(
+                base64.b64encode(public_der).decode("ascii"),
+                {"oversized": "x" * 256},
+            )
+
 
 class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -94,9 +135,7 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_pairing_waits_until_scanner_is_stopped(self) -> None:
         self.observer._scanner_stopped.clear()
-        pause_task = asyncio.create_task(
-            self.observer._pause_scanner_for_pairing()
-        )
+        pause_task = asyncio.create_task(self.observer._pause_scanner_for_pairing())
         await asyncio.sleep(0)
         self.assertTrue(self.observer._scanner_pause_requested.is_set())
         self.assertFalse(pause_task.done())
@@ -105,6 +144,86 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
         await pause_task
         self.observer._resume_scanner_after_pairing()
         self.assertFalse(self.observer._scanner_pause_requested.is_set())
+
+    async def test_existing_bond_receipt_waits_for_ha_commit(self) -> None:
+        self.observer.config.interactive_pairing_task = "fake-task"
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        result_sent = asyncio.Event()
+        receipts = []
+
+        async def exchange(link, _timeout, gatt, progress, *, completion_receipt=False):
+            if completion_receipt:
+                receipts.append(link.session_id)
+            else:
+                progress(
+                    "receiver_proximity_confirmed",
+                    "near",
+                    attempt_expires_at=time.time() + 300,
+                )
+            return ReverseGattResult(
+                address="11:22:33:44:55:66",
+                name="iPhone",
+                transport="existing_windows_bond",
+            )
+
+        self.observer._run_interactive_app_pairing = exchange
+
+        def publish(topic, *_args, **_kwargs):
+            if topic == "pairing/result":
+                result_sent.set()
+
+        self.observer.mqtt.publish_bridge_json.side_effect = publish
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public = base64.b64encode(
+            key.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        ).decode()
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        with patch(
+            "observer.read_windows_private_ble_irks",
+            return_value=[{"irk": "11" * 16, "registry_leaf": "112233445566"}],
+        ):
+            task = asyncio.create_task(
+                self.observer._run_app_pairing_session(link, public, 60, {})
+            )
+            try:
+                await asyncio.wait_for(result_sent.wait(), 3)
+                self.assertEqual(receipts, [])
+                self.assertFalse(task.done())
+                self.observer._ha_pairing_committed.set()
+                await asyncio.wait_for(task, 3)
+                self.assertEqual(receipts, [link.session_id])
+            finally:
+                task.cancel()
+
+    async def test_stale_ha_confirmation_is_ignored(self) -> None:
+        task = asyncio.create_task(asyncio.Event().wait())
+        self.observer._active_pairing_task = task
+        self.observer._active_pairing_session_id = "current_session_1234"
+        loop = asyncio.create_task(self.observer._pairing_command_loop())
+        try:
+            await self.observer._pairing_commands.put(
+                {"action": "complete", "session_id": "old_session_1234"}
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(self.observer._ha_pairing_committed.is_set())
+            await self.observer._pairing_commands.put(
+                {"action": "complete", "session_id": "current_session_1234"}
+            )
+            await asyncio.sleep(0)
+            self.assertTrue(self.observer._ha_pairing_committed.is_set())
+        finally:
+            loop.cancel()
+            task.cancel()
+            await asyncio.gather(loop, task, return_exceptions=True)
 
     async def test_duplicate_active_pairing_command_is_ignored(self) -> None:
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

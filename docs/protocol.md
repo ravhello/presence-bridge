@@ -16,15 +16,19 @@ Assistant access token, MQTT credentials, or an IRK.
 
 Home Assistant and the observer communicate through the local MQTT broker under
 `presence_bridge/v1/observers/<observer_id>`. After scanning a code, the iPhone
-temporarily advertises a Bluetooth LE GATT service. The Windows observer scans
-for that service and initiates the connection and bond.
+temporarily advertises a Bluetooth LE GATT service. Current apps derive a fresh
+service UUID from the one-time QR secret and session id, which prevents Windows
+from reusing a stale GATT catalogue after a previous bond. Receivers also
+accept the original static service UUID so older app builds remain pairable.
+The Windows observer scans for either service and initiates the connection and
+bond.
 
 | Characteristic | UUID | Access |
 | --- | --- | --- |
-| Service | `61dd168c-4ec1-40de-a78c-ccdce5774bba` | Temporary iPhone advertisement |
+| Service | Per-session UUID; legacy `61dd168c-4ec1-40de-a78c-ccdce5774bba` | Temporary iPhone advertisement |
 | Session | `ef70387a-ba9d-4e83-9171-fea99252b57a` | Plain read by observer |
-| Claim | `700dbb64-64ed-4f51-adae-b106a00e908a` | Encrypted read by observer |
-| Result | `fb5312b1-c24c-42b5-8d21-5263874c258f` | Encrypted write by observer |
+| Claim | `700dbb64-64ed-4f51-adae-b106a00e908a` | HMAC-authenticated read by observer |
+| Result | `fb5312b1-c24c-42b5-8d21-5263874c258f` | HMAC-authenticated write by observer |
 
 ## Invitation
 
@@ -36,22 +40,36 @@ custom URL:
 presencepair://pair?v=2&sid=<session>&oid=<observer>&exp=<unix>&secret=<base64url>
 ```
 
-The invitation is valid for at most ten minutes; the default is three minutes.
-The app advertises only while that invitation is active and visible on screen.
+The invitation is valid for at most ten minutes to start. Scanning starts one
+five-minute app attempt, including proximity, retries and HA verification. The
+receiver starts its bounded attempt on the first exact QR-scoped advertisement.
+The completion phase inherits that deadline; it never renews it. Seeing a generic
+Presence Pair advertisement cannot consume or extend another invitation.
+
+After a matching live address is verified and its identity persisted, HA sends
+the receiver a non-retained MQTT `complete` command for the same active session.
+Only then does the receiver advertise a completion receipt for at most 20 seconds,
+within the remaining attempt budget. This also confirms reused Windows bonds
+whose GATT acknowledgement failed. The UUID is HMAC-SHA256(secret, UTF-8 of
+`presence-bridge-complete:v2\nsid\noid\nexp`), truncated to 16 bytes with the same
+UUID version/variant bits as the other services. The app scans only that UUID and
+accepts it only within its active attempt. It contains no identity or key.
+The encrypted GATT result means bond exchange accepted, not final HA completion.
 
 ## Claim and acknowledgement
 
 The observer first reads the public session characteristic and requires an
-exact match with its active invitation. Only then does it request a Windows
-bond and read the protected claim:
+exact match with its active invitation. It then reads and verifies this claim
+before requesting a Windows bond:
 
 ```text
 HMAC-SHA256(secret, "presence-bridge:v2\n<sid>\n<oid>\n<exp>")
 ```
 
-The claim characteristic requires Bluetooth link encryption. Reading it both
-establishes the operating-system bond and proves that the nearby app owns the
-invitation. The QR secret itself is never transmitted over Bluetooth.
+The claim proves that the nearby app owns the one-time invitation. The QR
+secret itself is never transmitted over Bluetooth. Verifying the claim before
+the bond also avoids a Windows/iOS interoperability failure where WinRT hides
+the temporary iPhone GATT service immediately after committing the bond.
 
 After verification, the observer writes an encrypted acknowledgement carrying:
 
@@ -59,13 +77,17 @@ After verification, the observer writes an encrypted acknowledgement carrying:
 HMAC-SHA256(secret, "presence-bridge-result:v2\n<sid>\n<oid>\n<exp>\naccepted")
 ```
 
-The app shows success only after validating that acknowledgement.
+The app shows success after validating that acknowledgement. If WinRT closes
+the temporary GATT channel immediately after a successful bond, the
+acknowledgement becomes best effort: the Windows observer still captures the
+new IRK and Home Assistant remains the authoritative completion state. It does
+not start a second pairing prompt.
 
 The cross-language test vectors are:
 
 ```text
 sid             = abcdefghijklmnopQRSTUVWX
-oid             = dell_cucina
+oid             = living_room_pc
 exp             = 1800000180
 secret          = bytes 00 through 1f
 claim proof     = -q6gU_keDbd_kcgOXTfnolM0m3ke96HzM_b-z1uuXPk
@@ -86,8 +108,8 @@ and diagnostics.
 
 ## Threat model
 
-- An attacker who only sees Bluetooth traffic cannot forge either HMAC or read
-  the encrypted claim.
+- An attacker who only sees Bluetooth traffic cannot forge either HMAC or
+  recover the QR secret from a claim.
 - A QR screenshot is sensitive during its ten-minute scan window. Cancel the
   session if the code is exposed. Scanning in time gives the iPhone one bounded
   five-minute attempt; once the exact session is verified, the QR is consumed
