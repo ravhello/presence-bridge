@@ -146,7 +146,12 @@ $acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($Pair
 Set-Acl -LiteralPath $InstallRoot -AclObject $acl
 
 $pairingAction = New-ScheduledTaskAction -Execute $venvPython -Argument ('"{0}" --command "{1}" --result "{2}" --log "{3}"' -f (Join-Path $InstallRoot 'interactive_pairing_helper.py'), (Join-Path $InstallRoot 'interactive-pairing-command.json'), (Join-Path $InstallRoot 'interactive-pairing-result.json'), (Join-Path $InstallRoot 'interactive-pairing.log')) -WorkingDirectory $InstallRoot
-$pairingSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 12) -MultipleInstances IgnoreNew
+$pairingSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 40) `
+    -MultipleInstances IgnoreNew `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
 $pairingPrincipal = New-ScheduledTaskPrincipal -UserId $PairingTaskUser -LogonType Interactive -RunLevel Highest
 $pairingTask = New-ScheduledTask -Action $pairingAction -Settings $pairingSettings -Principal $pairingPrincipal -Description 'Short-lived Presence Pair GATT client in the logged-in Windows Bluetooth session.'
 Register-ScheduledTask -TaskName $PairingTaskName -InputObject $pairingTask -Force | Out-Null
