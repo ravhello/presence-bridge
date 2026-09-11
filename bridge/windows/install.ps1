@@ -99,6 +99,7 @@ Set-Acl -LiteralPath $pairingRoot -AclObject (New-PresenceDirectoryAcl -PairingS
 $files = @(
     'adapter_info.py',
     'interactive_pairing_helper.py',
+    'identity_removal.py',
     'gatt_server.py',
     'observer.py',
     'protocol.py',

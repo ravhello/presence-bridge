@@ -23,7 +23,7 @@ import signal
 import sys
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -34,6 +34,7 @@ from bleak import BleakScanner
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from identity_removal import BondDevice, remove_identity_bonds
 from protocol import PairingLink, ProtocolError, b64url_decode
 from reverse_gatt_client import (
     ReverseGattError,
@@ -42,7 +43,7 @@ from reverse_gatt_client import (
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.25"
+BRIDGE_VERSION = "0.1.26"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -89,7 +90,7 @@ def scan_session_is_stale(
     return now - max(session_started, last_detection) >= timeout
 
 
-def read_windows_private_ble_irks() -> list[dict[str, str]]:
+def read_windows_private_ble_irks(*, strict: bool = False) -> list[dict[str, str]]:
     """Read Windows Bluetooth IRKs while running as LOCAL SYSTEM."""
     if sys.platform != "win32":
         return []
@@ -104,7 +105,9 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         while True:
             try:
                 value_name, value, _value_type = winreg.EnumValue(key, value_index)
-            except OSError:
+            except OSError as error:
+                if strict and getattr(error, "winerror", None) != 259:
+                    raise
                 break
             value_index += 1
             normalized_name = value_name.casefold()
@@ -127,13 +130,17 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         while True:
             try:
                 child_name = winreg.EnumKey(key, child_index)
-            except OSError:
+            except OSError as error:
+                if strict and getattr(error, "winerror", None) != 259:
+                    raise
                 break
             child_index += 1
             try:
                 with winreg.OpenKey(key, child_name, 0, winreg.KEY_READ) as child:
                     visit(child, f"{relative_path}\\{child_name}", depth + 1)
             except OSError:
+                if strict:
+                    raise
                 continue
 
     try:
@@ -145,6 +152,8 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         ) as root:
             visit(root, PRIVATE_BLE_REGISTRY_PATH)
     except OSError:
+        if strict:
+            raise
         return []
     return records
 
@@ -514,11 +523,13 @@ class MqttPublisher:
         except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
             return
         if isinstance(payload, dict) and self.command_handler is not None:
+            if payload.get("action") == "forget_identity" and message.retain:
+                return
             self.command_handler(payload)
 
     def status_payload(self, *, online: bool) -> dict[str, Any]:
         """Describe this bridge without exposing local credentials."""
-        capabilities = ["scanner", "manual_pairing"]
+        capabilities = ["scanner", "manual_pairing", "identity_removal"]
         if self.config.app_pairing_enabled:
             capabilities.append("app_pairing")
         return {
@@ -609,6 +620,7 @@ class BlePresenceObserver:
         self._active_pairing_session_id: str | None = None
         self._ha_pairing_committed = asyncio.Event()
         self._app_attempt_expires_at: float | None = None
+        self._removal_results: dict[str, dict[str, Any]] = {}
         self._scanner_pause_requested = asyncio.Event()
         self._scanner_stopped = asyncio.Event()
         self._scanner_stopped.set()
@@ -693,6 +705,9 @@ class BlePresenceObserver:
             payload = await self._pairing_commands.get()
             action = str(payload.get("action") or "").strip().lower()
             session_id = str(payload.get("session_id") or "").strip()
+            if action == "forget_identity":
+                await self._run_identity_removal(payload)
+                continue
             if action == "complete":
                 if (
                     session_id == self._active_pairing_session_id
@@ -780,6 +795,148 @@ class BlePresenceObserver:
                 self._active_pairing_task = asyncio.create_task(
                     self._run_pairing_session(session_id, public_key, timeout)
                 )
+
+    async def _run_identity_removal(self, payload: dict[str, Any]) -> None:
+        request_id = str(payload.get("request_id") or "")
+        fingerprint = str(payload.get("fingerprint") or "")
+        identity_id = str(payload.get("identity_id") or "")
+        try:
+            expires_at = float(payload.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            return
+        if (
+            not PAIRING_SESSION_ID_RE.fullmatch(request_id)
+            or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+            or identity_id != fingerprint[:16]
+            or not time.time() < expires_at <= time.time() + 90
+            or payload.get("observer_id") != self.config.observer_id
+        ):
+            return
+        cached = self._removal_results.get(request_id)
+        if cached is not None:
+            if cached["fingerprint"] == fingerprint:
+                self.mqtt.publish_bridge_json(
+                    "identity_removal/result", cached, retain=False
+                )
+            return
+        result = {
+            "request_id": request_id,
+            "identity_id": identity_id,
+            "fingerprint": fingerprint,
+            "observer_id": self.config.observer_id,
+            "success": False,
+        }
+        paused = False
+        try:
+            if (
+                self._active_pairing_task is not None
+                and not self._active_pairing_task.done()
+            ):
+                raise RuntimeError(
+                    "Finish or cancel the active pairing before removing a phone"
+                )
+            await self._pause_scanner_for_pairing()
+            paused = True
+            self._publish_observer_heartbeat()
+            journal = Path(self.config.interactive_pairing_command_path).with_name(
+                "identity-removals.json"
+            )
+            count = await remove_identity_bonds(
+                fingerprint,
+                lambda: read_windows_private_ble_irks(strict=True),
+                journal,
+                (
+                    lambda targets: self._run_interactive_identity_removal(
+                        request_id, targets
+                    )
+                )
+                if self.config.interactive_pairing_task
+                else None,
+            )
+            result.update(success=True, removed_bonds=count)
+            LOGGER.info(
+                "Phone removed: Windows bonds and private key verified absent (%s endpoints)",
+                count,
+            )
+        except Exception as error:
+            result["message"] = str(error) or type(error).__name__
+            LOGGER.warning("Phone removal failed: %s", result["message"])
+        finally:
+            if paused:
+                self._resume_scanner_after_pairing()
+        self._removal_results[request_id] = result
+        while len(self._removal_results) > 32:
+            self._removal_results.pop(next(iter(self._removal_results)))
+        self.mqtt.publish_bridge_json("identity_removal/result", result, retain=False)
+
+    async def _run_interactive_identity_removal(
+        self, request_id: str, targets: list[BondDevice]
+    ) -> None:
+        """Use the signed-in Bluetooth broker; SYSTEM still verifies the final keys."""
+        command_path = Path(self.config.interactive_pairing_command_path)
+        result_path = Path(self.config.interactive_pairing_result_path)
+
+        async def task_command(action: str, *, required: bool) -> None:
+            process = await asyncio.create_subprocess_exec(
+                "schtasks.exe",
+                action,
+                "/TN",
+                self.config.interactive_pairing_task,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+            if required and process.returncode != 0:
+                detail = (stderr or stdout).decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"Windows Bluetooth removal helper unavailable: {detail}"
+                )
+
+        await task_command("/End", required=False)
+        result_path.unlink(missing_ok=True)
+        temporary = command_path.with_suffix(command_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "session_id": request_id,
+                    "transport": "identity_removal",
+                    "attempt_expires_at": time.time() + 40,
+                    "targets": [asdict(target) for target in targets],
+                }
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(command_path)
+        try:
+            await task_command("/Run", required=True)
+            async with asyncio.timeout(40):
+                while True:
+                    try:
+                        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+                    except (OSError, json.JSONDecodeError):
+                        result = {}
+                    if (
+                        isinstance(result, dict)
+                        and result.get("session_id") == request_id
+                    ):
+                        if result.get("state") == "error":
+                            raise RuntimeError(
+                                str(result.get("message") or "Windows removal failed")
+                            )
+                        if result.get("state") == "success":
+                            if result.get("removed_target_ids") != [
+                                target.device_id for target in targets
+                            ]:
+                                raise RuntimeError(
+                                    "Windows removal helper target mismatch"
+                                )
+                            return
+                    await asyncio.sleep(0.2)
+        finally:
+            await task_command("/End", required=False)
+            command_path.unlink(missing_ok=True)
+            result_path.unlink(missing_ok=True)
 
     async def _run_app_pairing_session(
         self,

@@ -5,12 +5,71 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import interactive_pairing_helper as helper
 import pytest
+from identity_removal import BondDevice
 from protocol import PairingLink
 from reverse_gatt_client import ReverseGattResult
+
+
+def test_identity_removal_uses_exact_targets_without_starting_pairing(
+    tmp_path, monkeypatch
+):
+    target = BondDevice("BluetoothLE#phone", "112233445566", "container", "ble")
+    request_id = "removal_request_12345"
+    payload = {
+        "transport": "identity_removal",
+        "session_id": request_id,
+        "attempt_expires_at": time.time() + 40,
+        "targets": [asdict(target)],
+    }
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(payload), encoding="utf-8")
+    remove = AsyncMock()
+    monkeypatch.setattr(helper, "unpair_device", remove)
+    assert asyncio.run(helper._run(command_path, result_path)) == 0
+    remove.assert_awaited_once_with(target)
+    result = json.loads(result_path.read_text())
+    assert result["session_id"] == request_id
+    assert result["removed_target_ids"] == [target.device_id]
+    assert result["state"] == "success"
+
+
+def test_identity_removal_reports_windows_failure(tmp_path, monkeypatch):
+    target = BondDevice("BluetoothLE#phone", "112233445566", "container", "ble")
+    payload = {
+        "transport": "identity_removal",
+        "session_id": "removal_request_12345",
+        "attempt_expires_at": time.time() + 40,
+        "targets": [asdict(target)],
+    }
+    monkeypatch.setattr(
+        helper, "unpair_device", AsyncMock(side_effect=RuntimeError("Windows busy"))
+    )
+    result_path = tmp_path / "result.json"
+    assert asyncio.run(helper._remove_bonds(payload, result_path)) == 1
+    assert json.loads(result_path.read_text())["state"] == "error"
+
+
+def test_identity_removal_rejects_expired_request(tmp_path, monkeypatch):
+    remove = AsyncMock()
+    monkeypatch.setattr(helper, "unpair_device", remove)
+    with pytest.raises(ValueError, match="Expired"):
+        asyncio.run(
+            helper._remove_bonds(
+                {
+                    "session_id": "removal_request_12345",
+                    "attempt_expires_at": time.time() - 1,
+                },
+                tmp_path / "result.json",
+            )
+        )
+    remove.assert_not_called()
 
 
 def command(

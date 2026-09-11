@@ -42,7 +42,7 @@ set_observer_area:
         area:
 remove_identity:
   name: Remove identity
-  description: Remove a private Bluetooth identity from Home Assistant.
+  description: Unpair the phone on its Windows receiver, verify removal, then remove its Home Assistant association. The receiver must be online.
   fields:
     identity_id:
       name: Identity

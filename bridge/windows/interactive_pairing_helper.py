@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from gatt_server import GattPairingServer, GattProximityServer
+from identity_removal import BondDevice, compact_address, unpair_device
 from protocol import PairingLink
 from reverse_gatt_client import ReverseGattPairingClient, ReverseGattResult
 
@@ -112,6 +114,8 @@ async def _run(command_path: Path, result_path: Path) -> int:
     command_text = command_path.read_text(encoding="utf-8-sig")
     command_path.unlink(missing_ok=True)
     raw = json.loads(command_text)
+    if raw.get("transport") == "identity_removal":
+        return await _remove_bonds(raw, result_path)
     receipt = raw.get("transport") == "completion_beacon"
     link = PairingLink.from_uri(str(raw["pairing_uri"]), allow_expired=receipt)
     if str(raw.get("session_id") or "") != link.session_id:
@@ -303,6 +307,45 @@ async def _run(command_path: Path, result_path: Path) -> int:
         secure_exchange_complete=peer.secure_exchange_complete,
     )
     return 0
+
+
+async def _remove_bonds(raw: dict[str, Any], result_path: Path) -> int:
+    request_id = str(raw.get("session_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,96}", request_id):
+        raise ValueError("Invalid Windows removal request")
+    remaining = float(raw.get("attempt_expires_at") or 0) - time.time()
+    if not 0 < remaining <= 55:
+        raise ValueError("Expired Windows removal request")
+    targets = [BondDevice(**row) for row in raw.get("targets", [])]
+    if not 1 <= len(targets) <= 8 or any(
+        not compact_address(target.address)
+        or target.transport not in {"classic", "ble"}
+        or not target.device_id.startswith(("Bluetooth#", "BluetoothLE#"))
+        for target in targets
+    ):
+        raise ValueError("Invalid Windows removal targets")
+    try:
+        async with asyncio.timeout(remaining):
+            for target in targets:
+                await unpair_device(target)
+        _status(
+            result_path,
+            request_id,
+            "success",
+            detail_code="windows_bonds_removed",
+            message="Windows removal completed; the service must verify key absence",
+            removed_target_ids=[target.device_id for target in targets],
+        )
+        return 0
+    except Exception as error:
+        _status(
+            result_path,
+            request_id,
+            "error",
+            detail_code="windows_removal_failed",
+            message=str(error) or type(error).__name__,
+        )
+        return 1
 
 
 def main() -> int:

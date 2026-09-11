@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from identity_removal import BondDevice
 from observer import (
     APP_PAIRING_TRANSPORT,
     BlePresenceObserver,
@@ -124,11 +125,110 @@ class BlePresenceObserverTest(unittest.TestCase):
 
 
 class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_interactive_removal_checks_target_receipt_and_cleans_exchange(self):
+        with tempfile.TemporaryDirectory() as directory:
+            command = Path(directory) / "command.json"
+            result = Path(directory) / "result.json"
+            self.observer.config.interactive_pairing_command_path = str(command)
+            self.observer.config.interactive_pairing_result_path = str(result)
+            self.observer.config.interactive_pairing_task = "test-helper"
+            target = BondDevice("BluetoothLE#phone", "112233445566", "container", "ble")
+            for match in (True, False):
+
+                async def spawn(*args, match=match, **kwargs):
+                    if "/Run" in args:
+                        payload = json.loads(command.read_text())
+                        self.assertNotIn("irk", payload)
+                        self.assertEqual(
+                            payload["targets"][0]["device_id"], target.device_id
+                        )
+                        result.write_text(
+                            json.dumps(
+                                {
+                                    "session_id": payload["session_id"],
+                                    "state": "success",
+                                    "removed_target_ids": [target.device_id]
+                                    if match
+                                    else ["another-phone"],
+                                }
+                            )
+                        )
+                    return SimpleNamespace(
+                        communicate=AsyncMock(return_value=(b"", b"")), returncode=0
+                    )
+
+                with patch(
+                    "observer.asyncio.create_subprocess_exec", side_effect=spawn
+                ):
+                    if match:
+                        await self.observer._run_interactive_identity_removal(
+                            "request_1234567890", [target]
+                        )
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "target mismatch"):
+                            await self.observer._run_interactive_identity_removal(
+                                "request_1234567890", [target]
+                            )
+                self.assertFalse(command.exists())
+                self.assertFalse(result.exists())
+
     async def asyncSetUp(self) -> None:
         with patch("observer.MqttPublisher", return_value=Mock()):
             self.observer = BlePresenceObserver(
                 SimpleNamespace(observer_id="dell_cucina")
             )
+
+    async def test_removal_command_is_scoped_expiring_and_idempotent(self):
+        self.observer.config.interactive_pairing_command_path = "unused-command.json"
+        self.observer.config.interactive_pairing_task = ""
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        payload = {
+            "observer_id": "dell_cucina",
+            "request_id": "request_1234567890",
+            "identity_id": "a" * 16,
+            "fingerprint": "a" * 64,
+            "expires_at": time.time() + 75,
+        }
+        with patch(
+            "observer.remove_identity_bonds", new=AsyncMock(return_value=2)
+        ) as remove:
+            await self.observer._run_identity_removal(
+                {**payload, "observer_id": "another_receiver"}
+            )
+            await self.observer._run_identity_removal(
+                {**payload, "expires_at": time.time() - 1}
+            )
+            remove.assert_not_awaited()
+            await self.observer._run_identity_removal(payload)
+            await self.observer._run_identity_removal(payload)
+            remove.assert_awaited_once()
+        self.observer._resume_scanner_after_pairing.assert_called_once()
+        self.assertTrue(
+            self.observer._removal_results[payload["request_id"]]["success"]
+        )
+
+    async def test_removal_does_not_interrupt_another_pairing(self):
+        active = asyncio.create_task(asyncio.Event().wait())
+        self.observer._active_pairing_task = active
+        payload = {
+            "observer_id": "dell_cucina",
+            "request_id": "request_1234567890",
+            "identity_id": "a" * 16,
+            "fingerprint": "a" * 64,
+            "expires_at": time.time() + 75,
+        }
+        try:
+            with patch("observer.remove_identity_bonds", new=AsyncMock()) as remove:
+                await self.observer._run_identity_removal(payload)
+                remove.assert_not_awaited()
+            self.assertFalse(active.cancelled())
+            self.assertFalse(
+                self.observer._removal_results[payload["request_id"]]["success"]
+            )
+        finally:
+            active.cancel()
+            await asyncio.gather(active, return_exceptions=True)
 
     async def test_pairing_waits_until_scanner_is_stopped(self) -> None:
         self.observer._scanner_stopped.clear()

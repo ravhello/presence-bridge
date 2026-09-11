@@ -51,6 +51,7 @@ from .const import (
     SIGNAL_STATE_UPDATED,
     STORAGE_KEY,
     STORAGE_VERSION,
+    TOPIC_IDENTITY_REMOVAL_RESULT,
     TOPIC_OBSERVATIONS,
     TOPIC_PAIRING_RESULT,
     TOPIC_PAIRING_STATUS,
@@ -161,6 +162,7 @@ class PresenceBridgeCoordinator:
         self._periodic_task: asyncio.Task[None] | None = None
         self._cipher_cache: dict[str, Any] = {}
         self._orphan_pairing_cancels: set[tuple[str, str]] = set()
+        self._removal_requests: dict[str, dict[str, Any]] = {}
 
     @property
     def away_timeout(self) -> int:
@@ -199,6 +201,7 @@ class PresenceBridgeCoordinator:
             (TOPIC_OBSERVATIONS, self._observations_message),
             (TOPIC_PAIRING_STATUS, self._pairing_status_message),
             (TOPIC_PAIRING_RESULT, self._pairing_result_message),
+            (TOPIC_IDENTITY_REMOVAL_RESULT, self._identity_removal_result_message),
         )
         for topic, handler in subscriptions:
             self._unsubscribers.append(
@@ -211,6 +214,8 @@ class PresenceBridgeCoordinator:
 
     async def async_unload(self) -> None:
         """Release subscriptions and stop active pairing."""
+        for request in self._removal_requests.values():
+            request["future"].cancel()
         await self.async_cancel_pairing(publish=True)
         for unsubscribe in self._unsubscribers:
             unsubscribe()
@@ -956,13 +961,76 @@ class PresenceBridgeCoordinator:
         async_dispatcher_send(self.hass, SIGNAL_STATE_UPDATED)
 
     async def async_remove_identity(self, identity_id: str) -> None:
-        """Forget one private identity without touching the Windows bond."""
+        """Unpair on the owning receiver before removing the HA association."""
+        async with self._pairing_lock:
+            await self._async_remove_identity_locked(str(identity_id))
+
+    async def _async_remove_identity_locked(self, identity_id: str) -> None:
         identities = self.memory.setdefault("identities", {})
-        identity_id = str(identity_id)
         if identity_id not in identities:
             raise HomeAssistantError("Unknown Presence Bridge identity")
+        if self._pairing_session is not None:
+            raise HomeAssistantError(
+                "Finish or cancel the active pairing before removing a phone"
+            )
+        row = identities[identity_id]
+        observer_id = str(row.get("paired_by") or "")
+        observer = self.observers.get(observer_id)
+        if observer is None or not observer.online:
+            raise HomeAssistantError(
+                "The receiver that paired this phone is offline; nothing was removed from HA"
+            )
+        if "identity_removal" not in observer.capabilities:
+            raise HomeAssistantError(
+                "Update the Windows receiver before removing this Bluetooth association"
+            )
+        fingerprint = hashlib.sha256(bytes.fromhex(row["irk"])).hexdigest()
+        if fingerprint[:16] != identity_id:
+            raise HomeAssistantError("Private identity mismatch; removal stopped")
+        request_id = secrets.token_urlsafe(24)
+        future = asyncio.get_running_loop().create_future()
+        self._removal_requests[request_id] = {
+            "observer_id": observer_id,
+            "identity_id": identity_id,
+            "fingerprint": fingerprint,
+            "future": future,
+        }
+        try:
+            await mqtt.async_publish(
+                self.hass,
+                f"{TOPIC_ROOT}/{observer_id}/pairing/command",
+                json.dumps(
+                    {
+                        "action": "forget_identity",
+                        "request_id": request_id,
+                        "observer_id": observer_id,
+                        "identity_id": identity_id,
+                        "fingerprint": fingerprint,
+                        "expires_at": time.time() + 75,
+                    }
+                ),
+                qos=1,
+                retain=False,
+            )
+            try:
+                result = await asyncio.wait_for(future, timeout=70)
+            except TimeoutError as error:
+                raise HomeAssistantError(
+                    "The receiver did not confirm removal; retry to verify Windows before clearing HA"
+                ) from error
+            if result.get("success") is not True:
+                raise HomeAssistantError(
+                    result.get("message")
+                    or "Windows Bluetooth removal failed; the HA association was preserved"
+                )
+        finally:
+            self._removal_requests.pop(request_id, None)
         identities.pop(identity_id)
-        await self.store.async_save(self.memory)
+        try:
+            await self.store.async_save(self.memory)
+        except Exception:
+            identities[identity_id] = row
+            raise
         self._rebuild_identity_states()
         entity_registry = er.async_get(self.hass)
         for platform, unique_id in (
@@ -981,7 +1049,29 @@ class PresenceBridgeCoordinator:
         device = device_registry.async_get_device(identifiers={(DOMAIN, identity_id)})
         if device:
             device_registry.async_remove_device(device.id)
+        self._cipher_cache.pop(row["irk"], None)
+        if self.pairing_public.get("identity_id") == identity_id:
+            self._set_pairing_state(
+                "idle",
+                "Phone removed from Home Assistant and the receiver; ready for a new pairing",
+            )
         async_dispatcher_send(self.hass, SIGNAL_STATE_UPDATED)
+
+    @callback
+    def _identity_removal_result_message(self, message: Any) -> None:
+        payload = self._decode_payload(message)
+        if not isinstance(payload, dict):
+            return
+        pending = self._removal_requests.get(str(payload.get("request_id") or ""))
+        if not pending or any(
+            payload.get(key) != pending[key]
+            for key in ("observer_id", "identity_id", "fingerprint")
+        ):
+            return
+        if _observer_id_from_topic(message.topic) != pending["observer_id"]:
+            return
+        if not pending["future"].done():
+            pending["future"].set_result(payload)
 
     def pairing_payload(self) -> dict[str, Any]:
         """Return the active pairing state for an authenticated HA client."""

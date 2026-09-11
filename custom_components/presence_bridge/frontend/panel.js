@@ -348,7 +348,8 @@ class PresenceBridgePanel extends HTMLElement {
   }
 
   async removeIdentity(element) {
-    if (!window.confirm(this.text("Remove this Bluetooth identity and its Home Assistant entities?", "Rimuovere questa identità Bluetooth e le relative entità di Home Assistant?"))) return;
+    if (!window.confirm(this.text("Unpair this phone on its Windows receiver and remove its Home Assistant association?", "Rimuovere questo telefono dagli abbinati del ricevitore Windows e dissociarlo da Home Assistant?"))) return;
+    element.disabled = true;
     try {
       await this._hass.callWS({
         type: "presence_bridge/remove_identity",
@@ -358,6 +359,8 @@ class PresenceBridgePanel extends HTMLElement {
     } catch (error) {
       this._error = error?.message || String(error);
       this.render();
+    } finally {
+      element.disabled = false;
     }
   }
 }

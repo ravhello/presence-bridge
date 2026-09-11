@@ -86,6 +86,20 @@ each one to its area and repeat the check while moving between rooms.
 
 ## 6. Update or remove
 
+To dissociate a phone, remove its identity from the Presence Bridge panel.
+Starting with 0.1.26, this also removes its saved Bluetooth pairing on the
+Windows receiver that enrolled it. Keep that receiver online with its Windows
+account signed in; the short-lived helper handles removal without a Windows
+prompt. HA removes the identity only after the receiver verifies that the
+selected phone's BLE/classic bonds and private key are absent. Other phones
+and Wi-Fi assignments are not affected. If removal fails, keep the HA identity
+and retry once the reported receiver problem is resolved.
+
+For a completely fresh test, also use **Forget This Device** for the receiver in
+the iPhone's Bluetooth settings if it is still listed. HA cannot remotely clear
+iOS's saved-device list. Do not erase unrelated Bluetooth devices or reset the
+whole adapter. Then generate a new QR when ready to scan.
+
 Update the integration from HACS. For a Windows observer, rerun `install.ps1`
 from the new release while keeping its existing ID. The installer stops the old
 task, updates the files, and verifies the new service. Run `uninstall.ps1` as

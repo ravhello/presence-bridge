@@ -51,6 +51,19 @@ receipt after saving and verifying the identity, including on the existing-bond 
 - Existing bonds are reused automatically. Remove one only if HA explicitly
   reports an ambiguous or unusable Windows identity.
 
+## Removal fails or the server still remembers the phone
+
+- Update both the integration and its Windows receiver to 0.1.26 or later.
+- Keep the receiver that originally paired the phone online and its Bluetooth
+  account signed in. A different nearby receiver cannot erase the original bond.
+- Finish or cancel active pairing before removal. Removal never interrupts
+  another phone's enrollment.
+- HA keeps the identity when Windows has not confirmed full removal. Retry the
+  same identity after resolving the error; partial removal targets are retained
+  privately on Windows, even if the BLE key was already deleted.
+- A successful result verifies both Windows endpoints and private-key absence.
+  An entry still shown on iOS must be forgotten on the iPhone for a clean test.
+
 ## The room is wrong
 
 - Assign every fixed observer to the correct HA area.

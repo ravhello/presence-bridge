@@ -61,8 +61,15 @@ the same address. Your chosen email/share provider has its own privacy policy.
 - use a unique MQTT account and limit it to the Presence Bridge topic tree;
 - keep HA, MQTT, and observers on trusted LANs or encrypted links;
 - keep Windows and iOS security updates installed;
-- remove an identity in HA and the Windows Bluetooth bond when a phone changes
-  owner.
+- remove an identity in HA when a phone changes owner; version 0.1.26 also
+  removes its bonds on the enrolling Windows receiver before confirming.
+
+Removal commands contain a one-way identity fingerprint, not the private key.
+An unfinished removal keeps a local Windows journal of only the exact device
+IDs, Bluetooth addresses and physical container needed to retry safely. That
+entry is deleted when removal is verified. HA retains the identity until the
+owning receiver confirms that the bonds and private key are absent. This does
+not erase the iPhone's own saved-device list.
 
 ## Disclosure
 

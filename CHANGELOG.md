@@ -2,6 +2,22 @@
 
 All notable changes to Presence Bridge are documented here.
 
+## 0.1.26 - release candidate
+
+- Removing an identity now unpairs the phone on the Windows receiver that
+  enrolled it, then clears HA only after Windows verifies bond and key absence.
+- Match the exact private identity and its physical Windows container to remove
+  both BLE and classic endpoints without selecting unrelated devices by name.
+- Use the signed-in Bluetooth broker for BLE removal and a native desktop API
+  fallback for remembered devices; no manual Windows interaction is needed.
+- Preserve HA associations on offline receivers, errors and timeouts. Journal
+  exact unfinished removal targets so partial failures can be retried safely.
+- Reject retained, expired, wrong-receiver and mismatched removal messages;
+  duplicate requests are idempotent and no private key is sent in the command.
+- Update removal confirmations and document clean test setup on both endpoints.
+- Server-side unpair was physically verified; fresh and reused-bond pairing
+  remain release gates inherited from 0.1.25.
+
 ## 0.1.25 - release candidate
 
 - Require a successful encrypted iPhone acknowledgement before exporting an
