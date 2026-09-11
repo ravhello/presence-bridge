@@ -64,6 +64,7 @@ class ReverseGattResult:
     address: str
     name: str
     transport: str = "iphone_peripheral"
+    secure_exchange_complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +108,7 @@ class ReverseGattPairingClient:
         self._completion_deadline: float | None = None
         self._completion_expires_at: int | None = None
         self._secure_bond_confirmed = False
+        self._initial_discovery_probed = False
 
     @property
     def lease_payload(self) -> dict[str, Any]:
@@ -286,10 +288,19 @@ class ReverseGattPairingClient:
             )
             return client
         except BaseException:
-            with suppress(Exception):
-                if client.is_connected:
-                    await asyncio.wait_for(client.disconnect(), timeout=5)
+            await self._release_client(client)
             raise
+
+    @staticmethod
+    async def _release_client(client: BleakClient) -> None:
+        """Stop WinRT reconnects even when the last GATT status was CLOSED."""
+        if sys.platform == "win32":
+            session = getattr(getattr(client, "_backend", None), "_session", None)
+            if session is not None:
+                with suppress(Exception):
+                    session.maintain_connection = False
+        with suppress(Exception):
+            await asyncio.wait_for(client.disconnect(), timeout=5)
 
     @staticmethod
     def _enable_winrt_service_change_retry(client: BleakClient) -> None:
@@ -345,13 +356,7 @@ class ReverseGattPairingClient:
         device: Any,
         time_budget: float,
     ) -> BleakClient:
-        """Open GATT using bounded WinRT discovery fallbacks.
-
-        Discovery errors are not proof of a stale bond. In particular, iOS can
-        briefly close a new peripheral session while Windows is enumerating its
-        services. Never remove a saved phone bond at this stage; a reset is only
-        allowed later, after the QR session and HMAC claim have been verified.
-        """
+        """Try discovery, then let the caller repair only the QR-selected peer."""
         deadline = time.monotonic() + min(82.0, time_budget)
         detected_type = self._windows_address_type(device)
         strategies: list[_ConnectionStrategy] = []
@@ -414,6 +419,30 @@ class ReverseGattPairingClient:
                 )
             )
 
+        if (
+            not self._initial_discovery_probed
+            and not self._secure_bond_confirmed
+            and self._completion_deadline is None
+            and self._session_service_uuid is not None
+            and self._matched_service_uuid == self._session_service_uuid
+        ):
+            # A phone forgotten on only one side can flap indefinitely during
+            # discovery. Try both native and fresh discovery before the existing
+            # one-peer recovery, rather than exhausting every cache permutation.
+            self._initial_discovery_probed = True
+            strategies = strategies[:2]
+            strategies = [
+                _ConnectionStrategy(
+                    route.label,
+                    route.address_type,
+                    route.filter_services,
+                    route.use_cached_services,
+                    route.pair_before_discovery,
+                    min(route.timeout, 8.0),
+                )
+                for route in strategies
+            ]
+
         last_error: BaseException | None = None
         for index, strategy in enumerate(strategies):
             remaining = deadline - time.monotonic()
@@ -438,9 +467,7 @@ class ReverseGattPairingClient:
                     strategy.label,
                     inventory,
                 )
-                with suppress(Exception):
-                    if connected.is_connected:
-                        await asyncio.wait_for(connected.disconnect(), timeout=8)
+                await self._release_client(connected)
                 raise BleakCharacteristicNotFoundError(self.session_uuid)
             except asyncio.CancelledError:
                 raise
@@ -604,6 +631,7 @@ class ReverseGattPairingClient:
                 return ReverseGattResult(
                     address=str(getattr(device, "address", "") or ""),
                     name=str(getattr(device, "name", "") or "Presence Pair iPhone"),
+                    secure_exchange_complete=True,
                 )
 
             if await self._windows_reports_paired(client):
@@ -703,11 +731,10 @@ class ReverseGattPairingClient:
             return ReverseGattResult(
                 address=str(getattr(device, "address", "") or ""),
                 name=str(getattr(device, "name", "") or "Presence Pair iPhone"),
+                secure_exchange_complete=True,
             )
         finally:
-            with suppress(Exception):
-                if client.is_connected:
-                    await asyncio.wait_for(client.disconnect(), timeout=8)
+            await self._release_client(client)
 
     async def async_pair(
         self,
@@ -729,6 +756,7 @@ class ReverseGattPairingClient:
         self._completion_deadline = None
         self._completion_expires_at = None
         self._secure_bond_confirmed = False
+        self._initial_discovery_probed = False
         invitation_deadline = min(
             time.monotonic() + timeout_seconds,
             time.monotonic() + max(1, link.expires_at - int(time.time())),
@@ -832,7 +860,9 @@ class ReverseGattPairingClient:
                             device,
                             address_type=self._windows_address_type(device),
                         )
-                    except BaseException as error:
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
                         LOGGER.info(
                             "The session-scoped iPhone had no removable Windows bond: %s",
                             self._error_summary(error),

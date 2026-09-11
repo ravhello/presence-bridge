@@ -219,6 +219,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.address, device.address)
+        self.assertTrue(result.secure_exchange_complete)
         initial_client.pair.assert_not_awaited()
         initial_client.disconnect.assert_awaited_once()
         acknowledgement = json.loads(
@@ -521,6 +522,51 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(connect.await_args.kwargs["pair_before_discovery"])
         self.assertFalse(connect.await_args.kwargs["use_cached_services"])
         self.assertTrue(connect.await_args.kwargs["filter_services"])
+
+    async def test_first_qr_discovery_has_two_short_probes_before_recovery(
+        self,
+    ) -> None:
+        client = ReverseGattPairingClient(
+            service_uuid="legacy",
+            session_uuid="session",
+            claim_uuid="claim",
+            result_uuid="result",
+        )
+        client._session_service_uuid = "active-qr"
+        client._matched_service_uuid = "active-qr"
+        with (
+            patch.object(
+                client, "_connect_candidate", new=AsyncMock(side_effect=TimeoutError())
+            ) as connect,
+            patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
+        ):
+            with self.assertRaises(TimeoutError):
+                await client._open_candidate(SimpleNamespace(address="test"), 90)
+            self.assertEqual(connect.await_count, 2)
+            self.assertTrue(
+                all(
+                    call.kwargs["connection_timeout"] <= 8
+                    for call in connect.await_args_list
+                )
+            )
+            connect.reset_mock()
+            with self.assertRaises(TimeoutError):
+                await client._open_candidate(SimpleNamespace(address="test"), 90)
+            self.assertGreater(connect.await_count, 2)
+
+    async def test_release_stops_reconnects_even_when_link_is_not_connected(
+        self,
+    ) -> None:
+        session = SimpleNamespace(maintain_connection=True)
+        client = SimpleNamespace(
+            is_connected=False,
+            _backend=SimpleNamespace(_session=session),
+            disconnect=AsyncMock(),
+        )
+        with patch("reverse_gatt_client.sys.platform", "win32"):
+            await ReverseGattPairingClient._release_client(client)
+        self.assertFalse(session.maintain_connection)
+        client.disconnect.assert_awaited_once()
 
     async def test_session_scoped_advertisement_refreshes_saved_bond_once(self) -> None:
         link = PairingLink(

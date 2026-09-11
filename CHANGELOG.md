@@ -4,6 +4,14 @@ All notable changes to Presence Bridge are documented here.
 
 ## 0.1.25 - release candidate
 
+- Require a successful encrypted iPhone acknowledgement before exporting an
+  identity or transmitting Home Assistant's completion receipt. A matching
+  saved Windows IRK alone is no longer a successful pairing.
+- Try two bounded discovery probes before the existing QR-scoped, one-peer
+  stale-bond recovery; retain full compatibility retries after that recovery.
+- Explicitly release WinRT reconnection requests even when GATT is already
+  disconnected; log pairing phase timings without invitation secrets.
+- Hold publication pending a physical forget/re-pair test of these changes.
 - Prepare the free public compatibility release for Presence Pair build 214.
 - Check both BLE central and peripheral roles before accepting an adapter.
 - Limit the interactive pairing account to read-only access to SYSTEM code;

@@ -204,6 +204,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
                 address="",
                 name="Presence Pair iPhone",
                 transport=transport,
+                secure_exchange_complete=True,
             )
         elif transport == "iphone_peripheral":
             client = ReverseGattPairingClient(
@@ -299,6 +300,7 @@ async def _run(command_path: Path, result_path: Path) -> int:
         address=peer.address,
         name=peer.name,
         transport=peer.transport,
+        secure_exchange_complete=peer.secure_exchange_complete,
     )
     return 0
 

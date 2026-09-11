@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -15,7 +18,6 @@ from observer import (
     ObserverConfig,
     encrypt_pairing_result,
     normalize_address,
-    pairing_ack_fallback_ready,
     scan_session_is_stale,
     select_irk_record_for_address,
     select_new_irk_records,
@@ -43,11 +45,6 @@ class BlePresenceObserverTest(unittest.TestCase):
         )
         self.assertFalse(scan_session_is_stale(100.0, 180.0, 250.0, 120.0))
         self.assertTrue(scan_session_is_stale(100.0, 180.0, 300.0, 120.0))
-
-    def test_existing_bond_fallback_waits_for_iphone_ack_reconnect(self) -> None:
-        self.assertFalse(pairing_ack_fallback_ready(None, 100.0))
-        self.assertFalse(pairing_ack_fallback_ready(100.0, 129.9))
-        self.assertTrue(pairing_ack_fallback_ready(100.0, 130.0))
 
     def test_new_irk_records_are_unique_and_exclude_the_baseline(self) -> None:
         baseline = [{"irk": "00" * 16, "registry_leaf": "AABBCCDDEEFF"}]
@@ -145,7 +142,7 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
         self.observer._resume_scanner_after_pairing()
         self.assertFalse(self.observer._scanner_pause_requested.is_set())
 
-    async def test_existing_bond_receipt_waits_for_ha_commit(self) -> None:
+    async def test_encrypted_exchange_receipt_waits_for_ha_commit(self) -> None:
         self.observer.config.interactive_pairing_task = "fake-task"
         self.observer._pause_scanner_for_pairing = AsyncMock()
         self.observer._resume_scanner_after_pairing = Mock()
@@ -164,7 +161,7 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
             return ReverseGattResult(
                 address="11:22:33:44:55:66",
                 name="iPhone",
-                transport="existing_windows_bond",
+                secure_exchange_complete=True,
             )
 
         self.observer._run_interactive_app_pairing = exchange
@@ -203,6 +200,88 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(receipts, [link.session_id])
             finally:
                 task.cancel()
+
+    async def test_registry_only_peer_cannot_publish_an_identity(self) -> None:
+        self.observer.config.interactive_pairing_task = "fake-task"
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        self.observer._run_interactive_app_pairing = AsyncMock(
+            return_value=ReverseGattResult(
+                address="11:22:33:44:55:66",
+                name="iPhone",
+                transport="existing_windows_bond",
+            )
+        )
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        with patch("observer.read_windows_private_ble_irks", return_value=[]):
+            await self.observer._run_app_pairing_session(link, "unused", 60, {})
+        self.assertFalse(
+            any(
+                call.args[0] == "pairing/result"
+                for call in self.observer.mqtt.publish_bridge_json.call_args_list
+            )
+        )
+        self.assertTrue(
+            any(
+                call.args[1].get("detail_code") == "iphone_secure_exchange_missing"
+                for call in self.observer.mqtt.publish_bridge_json.call_args_list
+                if len(call.args) > 1 and isinstance(call.args[1], dict)
+            )
+        )
+
+    async def test_helper_success_requires_encrypted_exchange_not_saved_bond(
+        self,
+    ) -> None:
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        for proof in (None, False, "true", True):
+            with self.subTest(proof=proof), tempfile.TemporaryDirectory() as directory:
+                command = Path(directory) / "command.json"
+                result = Path(directory) / "result.json"
+                self.observer.config.interactive_pairing_command_path = str(command)
+                self.observer.config.interactive_pairing_result_path = str(result)
+                self.observer.config.interactive_pairing_task = "fake-task"
+
+                async def spawn(*args, result=result, proof=proof, **kwargs):
+                    if "/Run" in args:
+                        result.write_text(
+                            json.dumps(
+                                {
+                                    "session_id": link.session_id,
+                                    "state": "success",
+                                    "address": "11:22:33:44:55:66",
+                                    "secure_exchange_complete": proof,
+                                }
+                            )
+                        )
+                    return SimpleNamespace(
+                        returncode=0, communicate=AsyncMock(return_value=(b"", b""))
+                    )
+
+                with patch(
+                    "observer.asyncio.create_subprocess_exec", side_effect=spawn
+                ):
+                    if proof is True:
+                        peer = await self.observer._run_interactive_app_pairing(
+                            link, 60, {}, Mock()
+                        )
+                        self.assertTrue(peer.secure_exchange_complete)
+                    else:
+                        with self.assertRaisesRegex(
+                            RuntimeError, "encrypted Bluetooth"
+                        ):
+                            await self.observer._run_interactive_app_pairing(
+                                link, 60, {}, Mock()
+                            )
 
     async def test_stale_ha_confirmation_is_ignored(self) -> None:
         task = asyncio.create_task(asyncio.Event().wait())

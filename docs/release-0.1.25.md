@@ -4,13 +4,18 @@ Companion integration and Windows receiver for the free compatibility edition
 of Presence Pair 1.0.0, build 214. This is a preview, not a guarantee that every
 iPhone, Windows driver, adapter or floor plan has been validated.
 
+Publication hold, 2026-09-11: the original candidate archive does not contain
+the encrypted-exchange gate and stale-bond recovery fixes. Do not publish it.
+Rebuild the tracked-source archive and repeat the physical forget/re-pair test
+before advancing this release, including a valid saved-bond reuse case.
+
 ## Changes since public 0.1.17
 
 - A QR starts one five-minute attempt with proximity checks, retries and saved
   bond reuse. Missing iOS Pair prompts are not treated as errors by themselves.
-- Success requires a session-specific receipt after Home Assistant saves the
-  identity. Encrypted payload capacity and delayed Windows bond discovery are
-  handled explicitly.
+- Success requires a successful encryption-protected acknowledgement on the
+  iPhone, then a session-specific receipt after Home Assistant saves the
+  identity. A saved Windows key is not enough to confirm pairing.
 - Windows enrollment runs in a signed-in interactive session; passive presence
   runs as SYSTEM. The installer checks both central and peripheral BLE roles.
 - Pairing exchange files are isolated from SYSTEM executable files. Updates

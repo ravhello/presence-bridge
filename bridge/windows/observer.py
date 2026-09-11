@@ -54,7 +54,6 @@ MIN_PAIRING_TIMEOUT_SECONDS = 60
 SCANNER_PAUSE_TIMEOUT_SECONDS = 10.0
 PAIRING_HEARTBEAT_SECONDS = 10.0
 APP_PAIRING_TRANSPORT = "iphone_peripheral"
-PAIRING_ACK_RECONNECT_GRACE_SECONDS = 30.0
 
 
 def mqtt_reason_is_failure(reason_code: Any) -> bool:
@@ -88,14 +87,6 @@ def scan_session_is_stale(
 ) -> bool:
     """Return whether a live scanner stopped delivering advertisements."""
     return now - max(session_started, last_detection) >= timeout
-
-
-def pairing_ack_fallback_ready(first_seen: float | None, now: float) -> bool:
-    """Allow IRK-only completion only after the iPhone ACK had time to reconnect."""
-    return (
-        first_seen is not None
-        and now - first_seen >= PAIRING_ACK_RECONNECT_GRACE_SECONDS
-    )
 
 
 def read_windows_private_ble_irks() -> list[dict[str, str]]:
@@ -834,7 +825,7 @@ class BlePresenceObserver:
                 "iphone_connection_retry": "connecting",
                 "iphone_signal_too_weak": "connecting",
                 "iphone_bond_reset": "bonding",
-                "existing_bond_resolved": "bonding",
+                "iphone_bond_refresh": "connecting",
                 "legacy_receiver_advertising": "waiting_for_app",
                 "windows_adapter_recovering": "waiting_for_app",
             }
@@ -905,18 +896,16 @@ class BlePresenceObserver:
                     progress_callback=publish_progress,
                 )
                 peer = await client.async_pair(link, timeout_seconds)
-            reused_bond = peer.transport == "existing_windows_bond"
+            if not peer.secure_exchange_complete:
+                raise ReverseGattError(
+                    "The saved Windows identity is not proof of a working Bluetooth bond",
+                    "iphone_secure_exchange_missing",
+                )
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
-                (
-                    "Existing Windows bond recognized; capturing the private identity"
-                    if reused_bond
-                    else "Encrypted claim accepted; capturing the private identity"
-                ),
-                detail_code=(
-                    "existing_bond_resolved" if reused_bond else "iphone_claim_accepted"
-                ),
+                "Encrypted claim accepted; capturing the private identity",
+                detail_code="iphone_claim_accepted",
                 transport=peer.transport,
             )
             remaining = (self._app_attempt_expires_at or time.time()) - time.time()
@@ -1074,12 +1063,12 @@ class BlePresenceObserver:
             time.monotonic() + max(1, link.expires_at - int(time.time())),
         )
         last_update: tuple[str, str] | None = None
+        started_at = time.monotonic()
         attempt_deadline: float | None = (
             self._app_attempt_expires_at if completion_receipt else None
         )
         if attempt_deadline is not None:
             deadline = time.monotonic() + max(0, attempt_deadline - time.time())
-        existing_bond_seen_at: float | None = None
         try:
             while True:
                 if result_path.is_file():
@@ -1098,12 +1087,6 @@ class BlePresenceObserver:
                         payload.get("detail_code") or "interactive_pairing"
                     )
                     message = str(payload.get("message") or detail_code)
-                    matched_address = normalize_address(
-                        str(payload.get("matched_address") or "")
-                    )
-                    session_scoped_advertisement = (
-                        payload.get("session_scoped_advertisement") is True
-                    )
                     reported_lease: dict[str, int] = {}
                     try:
                         reported_rssi = int(payload.get("rssi"))
@@ -1156,51 +1139,34 @@ class BlePresenceObserver:
                     update = (detail_code, message)
                     if state == "progress" and update != last_update:
                         last_update = update
-                        progress_callback(detail_code, message, **reported_lease)
-                    if (
-                        state == "progress"
-                        and detail_code
-                        in {
-                            "iphone_connection_retry",
-                            "iphone_connection_failed",
-                            "iphone_signal_too_weak",
-                        }
-                        and session_scoped_advertisement
-                        and matched_address
-                    ):
-                        record = select_irk_record_for_address(
-                            await asyncio.to_thread(read_windows_private_ble_irks),
-                            matched_address,
+                        LOGGER.info(
+                            "Pairing helper step=%s elapsed=%.1fs",
+                            detail_code,
+                            time.monotonic() - started_at,
                         )
-                        if record is not None:
-                            if existing_bond_seen_at is None:
-                                existing_bond_seen_at = now_monotonic
-                                progress_callback(
-                                    "iphone_bond_settling",
-                                    "Bluetooth bond accepted; waiting for the iPhone confirmation channel",
-                                )
-                            elif pairing_ack_fallback_ready(
-                                existing_bond_seen_at,
-                                now_monotonic,
-                            ):
-                                progress_callback(
-                                    "existing_bond_resolved",
-                                    "The QR-matched iPhone already has a valid Windows bond; reusing it",
-                                )
-                                return ReverseGattResult(
-                                    address=matched_address,
-                                    name=str(
-                                        payload.get("name") or "Presence Pair iPhone"
-                                    ),
-                                    transport="existing_windows_bond",
-                                )
-                    elif state == "success":
+                        progress_callback(detail_code, message, **reported_lease)
+                    if state == "success":
+                        secure_exchange_complete = (
+                            payload.get("secure_exchange_complete") is True
+                        )
+                        if not completion_receipt and not secure_exchange_complete:
+                            raise ReverseGattError(
+                                "The iPhone has not confirmed the encrypted Bluetooth exchange",
+                                "iphone_secure_exchange_missing",
+                            )
+                        LOGGER.info(
+                            "Pairing helper finished encrypted_exchange=%s receipt=%s elapsed=%.1fs",
+                            secure_exchange_complete,
+                            completion_receipt,
+                            time.monotonic() - started_at,
+                        )
                         return ReverseGattResult(
                             address=str(payload.get("address") or ""),
                             name=str(payload.get("name") or "Presence Pair iPhone"),
                             transport=str(
                                 payload.get("transport") or APP_PAIRING_TRANSPORT
                             ),
+                            secure_exchange_complete=secure_exchange_complete,
                         )
                     elif state == "error":
                         raise ReverseGattError(message, detail_code)
