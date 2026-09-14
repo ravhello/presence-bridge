@@ -17,8 +17,13 @@ from typing import Any
 
 from gatt_server import GattPairingServer, GattProximityServer
 from identity_removal import BondDevice, compact_address, unpair_device
+from numeric_pairing_probe import QRSessionPairing
 from protocol import PairingLink
-from reverse_gatt_client import ReverseGattPairingClient, ReverseGattResult
+from reverse_gatt_client import (
+    GattMetadataLogFilter,
+    ReverseGattPairingClient,
+    ReverseGattResult,
+)
 
 LOGGER = logging.getLogger("presence_bridge.interactive_pairing")
 PREFLIGHT_READY_UUID = "b6201f73-89f1-4c2b-981f-7ccade5a52d4"
@@ -116,17 +121,23 @@ async def _run(command_path: Path, result_path: Path) -> int:
     raw = json.loads(command_text)
     if raw.get("transport") == "identity_removal":
         return await _remove_bonds(raw, result_path)
-    receipt = raw.get("transport") == "completion_beacon"
+    failure_receipt = raw.get("transport") == "failure_beacon"
+    receipt = failure_receipt or raw.get("transport") == "completion_beacon"
     link = PairingLink.from_uri(str(raw["pairing_uri"]), allow_expired=receipt)
     if str(raw.get("session_id") or "") != link.session_id:
         raise ValueError("Interactive pairing command session mismatch")
     if receipt:
-        # Only the SYSTEM observer can write this command, after HA's commit.
+        # Only SYSTEM can request a terminal receipt. Failure never means commit.
         remaining = float(raw["attempt_expires_at"]) - time.time()
         if not 0 < remaining <= 300:
             raise ValueError("Completion receipt is outside the active attempt")
         server = GattProximityServer(
-            ready_uuid=PREFLIGHT_READY_UUID, completion_receipt=True
+            ready_uuid=PREFLIGHT_READY_UUID,
+            **(
+                {"failure_receipt": True}
+                if failure_receipt
+                else {"completion_receipt": True}
+            ),
         )
         try:
             async with asyncio.timeout(remaining):
@@ -135,8 +146,12 @@ async def _run(command_path: Path, result_path: Path) -> int:
                     result_path,
                     link.session_id,
                     "progress",
-                    detail_code="completion_beacon_advertising",
-                    message="Home Assistant verified and saved this iPhone",
+                    detail_code="failure_beacon_advertising"
+                    if failure_receipt
+                    else "completion_beacon_advertising",
+                    message="The receiver stopped this attempt without completing enrollment"
+                    if failure_receipt
+                    else "Home Assistant verified and saved this iPhone",
                 )
                 await asyncio.sleep(
                     min(20, max(0, float(raw["attempt_expires_at"]) - time.time()))
@@ -147,8 +162,12 @@ async def _run(command_path: Path, result_path: Path) -> int:
             result_path,
             link.session_id,
             "success",
-            detail_code="completion_beacon_sent",
-            message="Home Assistant completion receipt transmitted",
+            detail_code="failure_beacon_sent"
+            if failure_receipt
+            else "completion_beacon_sent",
+            message="Terminal failure receipt transmitted"
+            if failure_receipt
+            else "Home Assistant completion receipt transmitted",
         )
         return 0
     gatt = raw["gatt"]
@@ -217,6 +236,9 @@ async def _run(command_path: Path, result_path: Path) -> int:
                 claim_uuid=str(gatt["claim_uuid"]),
                 result_uuid=str(gatt["result_uuid"]),
                 progress_callback=progress,
+                pairing_probe=QRSessionPairing(
+                    result_path.parent, _write_json, progress
+                ),
             )
             proximity_server = await _start_proximity_server(link, result_path)
             proximity_waiting = True
@@ -280,14 +302,16 @@ async def _run(command_path: Path, result_path: Path) -> int:
             link.session_id,
             "error",
             detail_code=detail_code,
+            failure_state=getattr(error, "terminal_state", "error"),
             message=f"{type(error).__name__}: {str(error).strip()}"[:300],
             **(client.lease_payload if client is not None else {}),
         )
         raise
     finally:
         for task in (iphone_seen_task, preflight_task, client_task):
-            if task is not None and not task.done():
-                task.cancel()
+            if task is not None:
+                if not task.done():
+                    task.cancel()
                 with suppress(BaseException):
                     await task
         if proximity_server is not None:
@@ -361,6 +385,7 @@ def main() -> int:
         handlers=[logging.FileHandler(args.log, encoding="utf-8")],
     )
     logging.getLogger("bleak.backends.winrt.client").setLevel(logging.DEBUG)
+    logging.getLogger("bleak.backends.winrt.client").addFilter(GattMetadataLogFilter())
 
     if not args.command.is_file():
         LOGGER.error("Interactive pairing command is missing")

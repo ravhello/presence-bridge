@@ -56,9 +56,11 @@ class PresenceBridgeRoomSensor(PresenceBridgeIdentityEntity, SensorEntity):
     @property
     def native_value(self) -> str | None:
         state = self.coordinator.identity_states.get(self.identity_id)
-        if state is None:
+        if state is None or not state.is_home:
             return None
         payload = self.coordinator.identity_payload(self.identity_id)
+        if not payload.get("room_fresh"):
+            return None
         return str(
             payload.get("area_name")
             or state.observer_name

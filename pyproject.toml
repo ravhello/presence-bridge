@@ -1,6 +1,6 @@
 [project]
 name = "presence-bridge-dev"
-version = "0.1.26"
+version = "0.1.36"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

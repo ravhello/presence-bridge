@@ -59,6 +59,7 @@ from .const import (
     TOPIC_STATUS,
 )
 from .models import IdentityState, ObserverState
+from .native_bluetooth import refresh_native_observations
 from .protocol import PairingLink, b64url_encode
 
 _IRK_RE = re.compile(r"^[0-9A-F]{32}$")
@@ -196,6 +197,7 @@ class PresenceBridgeCoordinator:
                 "observer_settings": settings if isinstance(settings, dict) else {},
             }
         self._rebuild_identity_states()
+        refresh_native_observations(self)
         subscriptions = (
             (TOPIC_STATUS, self._status_message),
             (TOPIC_OBSERVATIONS, self._observations_message),
@@ -228,7 +230,7 @@ class PresenceBridgeCoordinator:
 
     async def _async_periodic_refresh(self) -> None:
         while True:
-            await asyncio.sleep(15)
+            await asyncio.sleep(5)
             session = self._pairing_session
             if session and _pairing_deadline(session) <= int(time.time()):
                 if session.get("completion_expires_at"):
@@ -239,9 +241,10 @@ class PresenceBridgeCoordinator:
                     message = "Pairing code expired before an iPhone started"
                 await self.async_cancel_pairing(publish=True)
                 self._set_pairing_state("timeout", message)
-            changed = self._expire_runtime_state()
-            if changed:
-                async_dispatcher_send(self.hass, SIGNAL_STATE_UPDATED)
+            refresh_native_observations(self)
+            self._expire_runtime_state()
+            self._resolve_identities()
+            async_dispatcher_send(self.hass, SIGNAL_STATE_UPDATED)
 
     def _expire_runtime_state(self) -> bool:
         now = _utcnow()
@@ -254,6 +257,8 @@ class PresenceBridgeCoordinator:
             if observer.online != online:
                 observer.online = online
                 changed = True
+            if not online:
+                observer.observations.clear()
         for state in self.identity_states.values():
             is_home = bool(
                 state.last_seen
@@ -273,7 +278,13 @@ class PresenceBridgeCoordinator:
         observer = self._ensure_observer(observer_id, payload)
         observer.name = str(payload.get("name") or observer.name or observer_id)[:100]
         observer.online = bool(payload.get("online", True))
-        observer.last_seen = _parse_timestamp(payload.get("timestamp")) or _utcnow()
+        observer.last_seen = (
+            (_parse_timestamp(payload.get("timestamp")) or _utcnow())
+            if observer.online
+            else None
+        )
+        if not observer.online:
+            observer.observations.clear()
         observer.version = str(payload.get("version") or observer.version)[:40]
         capabilities = payload.get("capabilities")
         if isinstance(capabilities, list):
@@ -288,7 +299,9 @@ class PresenceBridgeCoordinator:
             return
         observer = self._ensure_observer(observer_id, payload)
         rows = payload.get("observations")
-        observer.observations = self._normalize_observations(rows)
+        observer.observations = self._normalize_observations(
+            rows, payload.get("timestamp") or payload.get("captured_at")
+        )
         observer.name = str(payload.get("name") or observer.name or observer_id)[:100]
         observer.online = True
         observer.last_seen = _parse_timestamp(payload.get("timestamp")) or _utcnow()
@@ -321,7 +334,9 @@ class PresenceBridgeCoordinator:
         return observer
 
     @staticmethod
-    def _normalize_observations(value: Any) -> list[dict[str, Any]]:
+    def _normalize_observations(
+        value: Any, captured_at: Any = None
+    ) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
         normalized: list[dict[str, Any]] = []
@@ -348,7 +363,7 @@ class PresenceBridgeCoordinator:
                     ),
                     "rssi": rssi,
                     "name": str(row.get("name") or "")[:100],
-                    "seen_at": str(row.get("seen_at") or "")[:40],
+                    "seen_at": str(row.get("seen_at") or captured_at or "")[:40],
                 }
             )
         return normalized
@@ -379,7 +394,6 @@ class PresenceBridgeCoordinator:
             async_dispatcher_send(self.hass, SIGNAL_IDENTITIES_UPDATED)
 
     def _resolve_identities(self) -> None:
-        now = _utcnow()
         for identity_id, row in self.memory.get("identities", {}).items():
             if not isinstance(row, dict):
                 continue
@@ -389,41 +403,62 @@ class PresenceBridgeCoordinator:
             matches = self._matches_for_irk(irk)
             if not matches:
                 continue
+            newest = max(match[2] for match in matches)
+            matches = [m for m in matches if (newest - m[2]).total_seconds() <= 30]
             strongest = max(matches, key=lambda match: match[1])
-            observer, rssi = strongest
+            observer, rssi, _seen = strongest
             state = self.identity_states.get(identity_id)
             if state is None:
                 continue
+            current = next(
+                (m for m in matches if m[0].observer_id == state.observer_id), None
+            )
+            if current is not None and current[1] + 6 >= rssi:
+                observer, rssi, _seen = current
             state.is_home = True
             state.observer_id = observer.observer_id
             state.observer_name = observer.name
             state.area_id = observer.area_id
             state.rssi = rssi
-            state.last_seen = now
+            state.signal_seen_at = _seen
+            state.last_seen = max(match[2] for match in matches)
 
-    def _matches_for_irk(self, irk: str) -> list[tuple[ObserverState, int]]:
+    def _matches_for_irk(self, irk: str) -> list[tuple[ObserverState, int, datetime]]:
         try:
-            cipher = self._cipher_cache.setdefault(
-                irk,
-                get_cipher_for_irk(bytes.fromhex(irk)),
-            )
+            cipher = self._cipher_cache.get(irk)
+            if cipher is None:
+                cipher = self._cipher_cache[irk] = get_cipher_for_irk(
+                    bytes.fromhex(irk)
+                )
         except (TypeError, ValueError):
             return []
-        matches: list[tuple[ObserverState, int]] = []
+        matches: list[tuple[ObserverState, int, datetime]] = []
+        now = _utcnow()
         for observer in self.observers.values():
             if not observer.online:
                 continue
             strongest: int | None = None
+            newest: datetime | None = None
             for observation in observer.observations:
+                seen = _parse_timestamp(observation.get("seen_at"))
+                if (
+                    seen is None
+                    or not 0 <= (now - seen).total_seconds() <= self.away_timeout
+                ):
+                    continue
                 try:
                     matched = resolve_private_address(cipher, observation["address"])
                 except (TypeError, ValueError):
                     continue
                 if matched:
                     rssi = int(observation["rssi"])
-                    strongest = rssi if strongest is None else max(strongest, rssi)
-            if strongest is not None:
-                matches.append((observer, strongest))
+                    # An older RPA must not hold the signal at its old peak.
+                    if newest is None or seen > newest:
+                        strongest, newest = rssi, seen
+                    elif seen == newest:
+                        strongest = max(strongest, rssi)
+            if strongest is not None and newest is not None:
+                matches.append((observer, strongest, newest))
         return matches
 
     async def async_start_pairing(
@@ -1130,6 +1165,12 @@ class PresenceBridgeCoordinator:
     def identity_payload(self, identity_id: str) -> dict[str, Any]:
         """Return one redacted entity snapshot."""
         state = self.identity_states[identity_id]
+        room_fresh = bool(
+            state.is_home
+            and state.signal_seen_at
+            and 0 <= (_utcnow() - state.signal_seen_at).total_seconds() <= 45
+        )
+        signal = self.signal_payload(identity_id)
         area = (
             self.area_registry.async_get_area(state.area_id) if state.area_id else None
         )
@@ -1139,11 +1180,65 @@ class PresenceBridgeCoordinator:
             "label": state.label,
             "is_home": state.is_home,
             "observer_id": state.observer_id,
-            "observer_name": state.observer_name,
-            "area_id": state.area_id,
-            "area_name": area.name if area else None,
-            "rssi": state.rssi,
+            "observer_name": state.observer_name if room_fresh else None,
+            "area_id": state.area_id if room_fresh else None,
+            "area_name": area.name if area and room_fresh else None,
+            "rssi": signal["rssi"],
+            "signal_seen_at": signal["sampled_at"],
+            "signal_fresh": signal["fresh"],
+            "signal_receivers": signal["receivers"],
+            "presence_evidence": "detected" if state.is_home else "not_detected",
+            "source_integration": DOMAIN,
+            "person_link_status": self.memory.get("identities", {})
+            .get(identity_id, {})
+            .get("person_link_status", "pending"),
+            "room_fresh": room_fresh,
+            "last_known_area": area.name if area else None,
+            "receiver_count": len(signal["receivers"]),
             "last_seen": state.last_seen.isoformat() if state.last_seen else None,
+        }
+
+    def signal_payload(self, identity_id: str) -> dict[str, Any]:
+        """Read-only, per-phone telemetry. No keys, addresses or other people."""
+        state = self.identity_states[identity_id]
+        row = self.memory.get("identities", {}).get(identity_id, {})
+        now = _utcnow()
+        receivers = []
+        for observer, rssi, seen in self._matches_for_irk(str(row.get("irk", ""))):
+            if (now - seen).total_seconds() > 45:
+                continue
+            area = (
+                self.area_registry.async_get_area(observer.area_id)
+                if observer.area_id
+                else None
+            )
+            receivers.append(
+                {
+                    "observer_id": observer.observer_id,
+                    "name": observer.name,
+                    "area_name": area.name if area else None,
+                    "rssi": rssi,
+                    "sampled_at": seen.isoformat(),
+                }
+            )
+        receivers.sort(key=lambda item: item["rssi"], reverse=True)
+        selected = next(
+            (r for r in receivers if r["observer_id"] == state.observer_id), None
+        )
+        return {
+            "version": 1,
+            "label": state.label,
+            "rssi": selected["rssi"] if selected else None,
+            "sampled_at": state.signal_seen_at.isoformat()
+            if state.signal_seen_at
+            else None,
+            "fresh": selected is not None,
+            "fresh_for_seconds": 45,
+            "poll_after_seconds": 3,
+            "server_time": now.isoformat(),
+            "receivers": receivers,
+            "distance_m": None,
+            "distance_status": "not_calibrated",
         }
 
     def diagnostics_payload(self) -> dict[str, Any]:
@@ -1159,6 +1254,7 @@ class PresenceBridgeCoordinator:
             observer["area_id"] = "REDACTED" if observer["area_id"] else None
             observer["area_name"] = "REDACTED" if observer["area_name"] else None
         for index, identity in enumerate(payload["identities"], start=1):
+            identity.pop("signal_receivers", None)
             identity["identity_id"] = f"IDENTITY_{index}"
             identity["person_entity_id"] = "REDACTED"
             identity["label"] = "REDACTED"
@@ -1170,6 +1266,9 @@ class PresenceBridgeCoordinator:
             )
             identity["area_id"] = "REDACTED" if identity.get("area_id") else None
             identity["area_name"] = "REDACTED" if identity.get("area_name") else None
+            identity["last_known_area"] = (
+                "REDACTED" if identity.get("last_known_area") else None
+            )
         payload["people"] = [
             {"entity_id": "REDACTED", "name": "REDACTED"}
             for _person in payload["people"]

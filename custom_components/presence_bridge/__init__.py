@@ -23,6 +23,7 @@ from .const import (
     STATIC_URL,
 )
 from .coordinator import PresenceBridgeCoordinator
+from .signal_api import SignalView, create_monitor
 
 DATA_REGISTERED = "_registered"
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -63,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not domain_data.get(DATA_REGISTERED):
         _async_register_websocket_commands(hass)
         _async_register_services(hass)
+        hass.http.register_view(SignalView(_coordinator))
         domain_data[DATA_REGISTERED] = True
 
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
@@ -168,7 +170,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 "name": "presence-bridge-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "js_url": f"{STATIC_URL}/panel.js?v=5",
+                "js_url": f"{STATIC_URL}/panel.js?v=7",
             }
         },
         require_admin=True,
@@ -239,6 +241,39 @@ async def websocket_cancel_pairing(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{DOMAIN}/signal_monitor",
+        vol.Required("identity_id"): cv.string,
+        vol.Optional("origin"): cv.string,
+        vol.Optional("revoke", default=False): cv.boolean,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_signal_monitor(hass, connection, msg):
+    coordinator = _coordinator(hass)
+    identity_id = msg["identity_id"]
+    if identity_id not in coordinator.identity_states:
+        connection.send_error(msg["id"], "not_found", "Identity no longer exists")
+        return
+    if msg["revoke"]:
+        row = coordinator.memory["identities"][identity_id]
+        row.pop("monitor_pending", None)
+        row.pop("monitor_access", None)
+        await coordinator.store.async_save(coordinator.memory)
+        result = {"revoked": True}
+    else:
+        try:
+            result = await create_monitor(
+                coordinator, identity_id, msg.get("origin", "")
+            )
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid_origin", str(err))
+            return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{DOMAIN}/set_observer_area",
         vol.Required("observer_id"): cv.string,
         vol.Optional("area_id"): cv.string,
@@ -285,6 +320,7 @@ async def websocket_remove_identity(
 
 @callback
 def _async_register_websocket_commands(hass: HomeAssistant) -> None:
+    websocket_api.async_register_command(hass, websocket_signal_monitor)
     websocket_api.async_register_command(hass, websocket_info)
     websocket_api.async_register_command(hass, websocket_start_pairing)
     websocket_api.async_register_command(hass, websocket_cancel_pairing)

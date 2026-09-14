@@ -27,8 +27,9 @@ login. Use a Windows version receiving security updates.
 
 ## 3. Prepare the Windows observer
 
-Download and extract the latest repository release. On the fixed Windows
-computer, open PowerShell **as Administrator** in `bridge\windows` and run:
+Download and extract `presence-bridge-windows-VERSION.zip` from the matching
+release. On the fixed Windows computer, open PowerShell **as Administrator** in
+the extracted folder containing `install.ps1` and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -73,6 +74,19 @@ and the app does not need to remain open after pairing. The same five minutes
 cover proximity, retries, bond reuse and HA verification; no phase resets the timer.
 
 ## 5. Verify the result
+
+The iPhone does not need Wi-Fi for Bluetooth pairing. The Windows receiver
+still needs network access to HA and MQTT; Ethernet works. An already valid
+bond may complete without another iOS Pair prompt. Completion still requires
+the protected Bluetooth acknowledgement and HA storage.
+
+For optional live dBm readings on the phone, use **Live signal in the app** in
+the Presence Bridge panel, choose the paired person and scan that separate QR.
+This is read-only HTTPS access to HA, not another Bluetooth pairing. The phone
+needs a route to your HA server for this monitor; on the usual private LAN,
+use Wi-Fi or your existing secure VPN. No public port needs to be opened.
+Measurements show their age and expire when no fresh sample is received.
+**Revoke signal access** revokes the monitor without removing the Bluetooth bond.
 
 Home Assistant creates three entities for each paired phone:
 

@@ -10,16 +10,23 @@ the phone.
 It consists of:
 
 - a free Home Assistant custom integration;
-- one or more always-on Windows Bluetooth observers;
+- a Windows Bluetooth receiver for initial pairing;
+- Windows observers and/or HA-native Bluetooth receivers for passive tracking;
 - the Presence Pair iPhone app, used once to establish a private Bluetooth
-  identity with an observer.
+  identity with an observer, with an optional foreground live-signal monitor.
 
-After pairing, the Windows observer passively sees rotating Bluetooth private
+After pairing, the receivers passively see rotating Bluetooth private
 addresses. Home Assistant resolves them locally and exposes a presence binary
 sensor, a room sensor, and a device tracker for each linked person. IRKs,
 Bluetooth addresses, and MQTT credentials never leave the local network.
 
 ## Requirements
+
+The iPhone does **not** need Wi-Fi for QR Bluetooth pairing. The Windows
+receiver needs network access to HA and MQTT (Ethernet is fine). The optional
+[live-signal monitor](docs/live-signal.md) is separate and needs HTTPS access
+from the phone to HA. A Wi-Fi/network outage in that monitor does not remove
+the Bluetooth identity. No pairing prompt must be accepted on the server.
 
 - Home Assistant 2025.1 or newer with MQTT configured;
 - a supported Windows installation with a Bluetooth LE adapter supporting
@@ -31,6 +38,11 @@ During initial pairing, the configured Windows user must be signed in (a
 locked session is sufficient). Passive observation runs as SYSTEM at startup.
 Bluetooth strength estimates a receiver's room, not an exact position or a
 guaranteed person count. Validate your own adapter and rooms before automating.
+
+See the [compatibility matrix and release gates](docs/compatibility.md) before
+choosing hardware. Native HA receivers receive advertisements only; they do not
+replace the Windows enrollment receiver. Missing reception is an unknown
+tracker state, not proof that the person left home.
 
 ## Install Home Assistant
 

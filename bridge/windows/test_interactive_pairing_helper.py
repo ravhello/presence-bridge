@@ -13,7 +13,11 @@ import interactive_pairing_helper as helper
 import pytest
 from identity_removal import BondDevice
 from protocol import PairingLink
-from reverse_gatt_client import ReverseGattResult
+from reverse_gatt_client import (
+    ReverseGattError,
+    ReverseGattResult,
+    ReverseGattTimeoutError,
+)
 
 
 def test_identity_removal_uses_exact_targets_without_starting_pairing(
@@ -101,8 +105,89 @@ def link() -> PairingLink:
     )
 
 
+@pytest.mark.parametrize(
+    "error_type, expected",
+    [
+        (ReverseGattError, "error"),
+        (ReverseGattTimeoutError, "timeout"),
+    ],
+)
+def test_helper_preserves_terminal_failure_kind(
+    tmp_path, monkeypatch, error_type, expected
+):
+    failure = error_type("test failure", "diagnostic")
+
+    class Reverse:
+        def __init__(self, **_kwargs):
+            self.lease_payload = {}
+
+        async def async_pair(self, *_args):
+            raise failure
+
+    class Proximity:
+        async def async_wait_until_ready(self, *_args):
+            await asyncio.Event().wait()
+
+        async def async_stop(self):
+            pass
+
+    monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
+    monkeypatch.setattr(
+        helper, "_start_proximity_server", AsyncMock(return_value=Proximity())
+    )
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(command(link())), encoding="utf-8")
+    with pytest.raises(error_type):
+        asyncio.run(helper._run(command_path, result_path))
+    result = json.loads(result_path.read_text())
+    assert result["state"] == "error"
+    assert result["failure_state"] == expected
+    assert result["detail_code"] == "diagnostic"
+
+
 def test_completion_beacon_requires_an_unexpired_attempt(tmp_path, monkeypatch):
     payload = command(link(), transport="completion_beacon")
+    payload["attempt_expires_at"] = time.time() - 1
+    command_path = tmp_path / "command.json"
+    command_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="outside the active attempt"):
+        asyncio.run(helper._run(command_path, tmp_path / "result.json"))
+
+
+def test_failure_beacon_never_reports_successful_enrollment(tmp_path, monkeypatch):
+    stopped = []
+
+    class Beacon:
+        def __init__(self, **kwargs):
+            assert kwargs["failure_receipt"] is True
+            assert not kwargs.get("completion_receipt")
+
+        async def async_start(self, _link):
+            pass
+
+        async def async_stop(self):
+            stopped.append(True)
+
+    async def no_wait(_seconds):
+        pass
+
+    payload = command(link(), transport="failure_beacon")
+    payload["attempt_expires_at"] = time.time() + 60
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(helper, "GattProximityServer", Beacon)
+    monkeypatch.setattr(helper.asyncio, "sleep", no_wait)
+    assert asyncio.run(helper._run(command_path, result_path)) == 0
+    result = json.loads(result_path.read_text())
+    assert result["detail_code"] == "failure_beacon_sent"
+    assert not result.get("secure_exchange_complete")
+    assert stopped == [True]
+
+
+def test_expired_failure_beacon_cannot_reopen_an_attempt(tmp_path):
+    payload = command(link(), transport="failure_beacon")
     payload["attempt_expires_at"] = time.time() - 1
     command_path = tmp_path / "command.json"
     command_path.write_text(json.dumps(payload), encoding="utf-8")

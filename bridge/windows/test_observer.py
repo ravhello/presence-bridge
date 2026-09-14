@@ -25,7 +25,11 @@ from observer import (
     verified_app_identity_payload,
 )
 from protocol import PairingLink
-from reverse_gatt_client import ReverseGattResult
+from reverse_gatt_client import (
+    ReverseGattError,
+    ReverseGattResult,
+    ReverseGattTimeoutError,
+)
 
 
 class BlePresenceObserverTest(unittest.TestCase):
@@ -333,6 +337,111 @@ class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
                 if len(call.args) > 1 and isinstance(call.args[1], dict)
             )
         )
+
+    async def test_terminal_pairing_failure_kind_reaches_ha_without_identity(self):
+        self.observer.config.interactive_pairing_task = "fake-task"
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        for error_type, expected in (
+            (ReverseGattError, "error"),
+            (ReverseGattTimeoutError, "timeout"),
+        ):
+            with self.subTest(expected=expected):
+                self.observer.mqtt.reset_mock()
+                self.observer._run_interactive_app_pairing = AsyncMock(
+                    side_effect=error_type("test failure", "diagnostic")
+                )
+                with patch("observer.read_windows_private_ble_irks", return_value=[]):
+                    await self.observer._run_app_pairing_session(link, "unused", 60, {})
+                calls = self.observer.mqtt.publish_bridge_json.call_args_list
+                self.assertFalse(
+                    any(call.args[0] == "pairing/result" for call in calls)
+                )
+                terminal = [
+                    call.args[1]
+                    for call in calls
+                    if call.args[1].get("detail_code") == "diagnostic"
+                ]
+                self.assertEqual(terminal[-1]["state"], expected)
+
+    async def test_failed_exchange_sends_only_failure_receipt_after_terminal_status(
+        self,
+    ):
+        self.observer.config.interactive_pairing_task = "fake-task"
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        self.observer._app_attempt_expires_at = time.time() + 60
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        heartbeat_stopped = asyncio.Event()
+        receipts = []
+
+        async def heartbeat(*_args):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                heartbeat_stopped.set()
+
+        self.observer._pairing_heartbeat_loop = heartbeat
+
+        async def exchange(*_args, failure_receipt=False, completion_receipt=False):
+            self.assertFalse(completion_receipt)
+            if not failure_receipt:
+                await asyncio.sleep(0)
+                raise ReverseGattError(
+                    "Encryption rejected", "iphone_encryption_failed"
+                )
+            statuses = [
+                call.args[1]
+                for call in self.observer.mqtt.publish_bridge_json.call_args_list
+                if call.args[0] == "pairing/status"
+            ]
+            receipts.append((heartbeat_stopped.is_set(), statuses[-1]))
+            return ReverseGattResult(address="", name="", transport="failure_beacon")
+
+        self.observer._run_interactive_app_pairing = AsyncMock(side_effect=exchange)
+        with patch("observer.read_windows_private_ble_irks", return_value=[]):
+            await self.observer._run_app_pairing_session(link, "unused", 60, {})
+        self.assertEqual(self.observer._run_interactive_app_pairing.await_count, 2)
+        self.assertEqual(len(receipts), 1)
+        self.assertTrue(receipts[0][0])
+        self.assertEqual(receipts[0][1]["state"], "error")
+        self.assertEqual(receipts[0][1]["detail_code"], "iphone_encryption_failed")
+        self.assertFalse(
+            any(
+                call.args[0] == "pairing/result"
+                for call in self.observer.mqtt.publish_bridge_json.call_args_list
+            )
+        )
+        self.observer._resume_scanner_after_pairing.assert_called_once()
+
+    async def test_expired_attempt_does_not_start_failure_beacon(self):
+        self.observer.config.interactive_pairing_task = "fake-task"
+        self.observer._pause_scanner_for_pairing = AsyncMock()
+        self.observer._resume_scanner_after_pairing = Mock()
+        self.observer._app_attempt_expires_at = time.time() - 1
+        self.observer._run_interactive_app_pairing = AsyncMock(
+            side_effect=ReverseGattTimeoutError("Expired", "iphone_encryption_failed")
+        )
+        link = PairingLink(
+            session_id="abcdefghijklmnop",
+            observer_id="dell_cucina",
+            expires_at=int(time.time()) + 60,
+            secret=bytes(range(32)),
+        )
+        with patch("observer.read_windows_private_ble_irks", return_value=[]):
+            await self.observer._run_app_pairing_session(link, "unused", 60, {})
+        self.observer._run_interactive_app_pairing.assert_awaited_once()
 
     async def test_helper_success_requires_encrypted_exchange_not_saved_bond(
         self,

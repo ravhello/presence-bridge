@@ -31,7 +31,9 @@ class PresenceBridgeIdentityEntity(Entity):
 
     @property
     def available(self) -> bool:
-        return self.identity_id in self.coordinator.identity_states
+        return self.identity_id in self.coordinator.identity_states and any(
+            observer.online for observer in self.coordinator.observers.values()
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

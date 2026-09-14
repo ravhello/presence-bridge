@@ -27,8 +27,9 @@ SYSTEM anche prima del login. Non tutti gli adattatori sono stati collaudati.
 
 ## 3. Prepara il ricevitore Windows
 
-Scarica e decomprimi l'ultima release del repository. Sul PC fisso apri
-PowerShell **come amministratore** nella cartella `bridge\windows` ed esegui:
+Scarica e decomprimi `presence-bridge-windows-VERSION.zip` dalla release
+corrispondente. Sul PC fisso apri PowerShell **come amministratore** nella
+cartella estratta che contiene `install.ps1` ed esegui:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -70,6 +71,19 @@ Non contiene password permanenti e, dopo l'associazione, l'app non deve restare
 aperta.
 
 ## 5. Verifica il risultato
+
+Per l'abbinamento Bluetooth non serve il Wi-Fi sull'iPhone. Il ricevitore
+Windows deve invece raggiungere HA e MQTT; va bene anche via Ethernet.
+Se il legame esistente e valido, iOS puo non mostrare un nuovo **Abbina**.
+La conferma richiede comunque lo scambio Bluetooth protetto e il salvataggio HA.
+
+Per vedere i dBm sul telefono, nella plancia Presence Bridge usa **Segnale live
+nell'app**, scegli la persona gia associata e scansiona quel QR separato.
+Non avvia un altro abbinamento: abilita un accesso HTTPS di sola lettura a HA.
+Per questo monitor l'iPhone deve raggiungere il server, normalmente via Wi-Fi
+o tramite la VPN sicura che usi gia. Non serve aprire porte pubbliche.
+Le misure mostrano la propria eta e scadono senza nuovi segnali ricevuti.
+**Revoca accesso al segnale** revoca il monitor e lascia intatto il Bluetooth.
 
 Per ogni telefono HA crea:
 

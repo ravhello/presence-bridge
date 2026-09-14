@@ -399,8 +399,17 @@ class GattPairingServer:
 class GattProximityServer(GattPairingServer):
     """Advertise a QR-scoped plaintext gate before secure pairing starts."""
 
-    def __init__(self, *, ready_uuid: str, completion_receipt: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        ready_uuid: str,
+        completion_receipt: bool = False,
+        failure_receipt: bool = False,
+    ) -> None:
+        if completion_receipt and failure_receipt:
+            raise ValueError("A receipt cannot report both completion and failure")
         self._completion_receipt = completion_receipt
+        self._failure_receipt = failure_receipt
         super().__init__(
             service_uuid="00000000-0000-0000-0000-000000000000",
             session_uuid="00000000-0000-0000-0000-000000000000",
@@ -412,11 +421,13 @@ class GattProximityServer(GattPairingServer):
         """Publish the receiver beacon and its authenticated ready write."""
         if sys.platform != "win32":
             raise RuntimeError("The proximity preflight requires Windows")
-        from protocol import completion_service_uuid
+        from protocol import completion_service_uuid, failure_service_uuid
 
-        link.validate(allow_expired=self._completion_receipt)
+        link.validate(allow_expired=self._completion_receipt or self._failure_receipt)
         self.service_uuid = (
-            completion_service_uuid(link)
+            failure_service_uuid(link)
+            if self._failure_receipt
+            else completion_service_uuid(link)
             if self._completion_receipt
             else preflight_service_uuid(link)
         )
@@ -495,7 +506,11 @@ class GattProximityServer(GattPairingServer):
                     await asyncio.sleep(1)
             LOGGER.info(
                 "QR-scoped Presence Pair %s beacon is advertising",
-                "completion" if self._completion_receipt else "proximity",
+                "failure"
+                if self._failure_receipt
+                else "completion"
+                if self._completion_receipt
+                else "proximity",
             )
         except Exception:
             await self.async_stop()

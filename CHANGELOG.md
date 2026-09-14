@@ -1,6 +1,140 @@
 # Changelog
 
+## 0.1.36 (candidate)
+
+- Live per-receiver RSSI with real packet timestamps and 45-second freshness.
+- Latest rotated-address measurement replaces historical maximum RSSI.
+- Separate, revocable read-only signal QR/API for the iOS live monitor; no new
+  Bluetooth pairing, keys or Home Assistant control permissions.
+- Native HA scanner cache refresh at 5 seconds. External bridge intervals remain
+  unchanged. Precise distance in meters is not claimed from RSSI.
+
 All notable changes to Presence Bridge are documented here.
+
+## 0.1.35 - release candidate, hardware gates pending
+
+- Use QR-scoped authenticated Windows pairing in the standard app flow, with
+  no diagnostic arm file or operator window. Keep the exact-session diagnostic
+  override for controlled fresh tests. Reuse only verified authenticated bonds
+  and still require the protected app acknowledgement.
+- Recover a one-sided forgotten bond at most once, only for a QR-verified peer
+  with an existing authenticated bond and an explicit ATT encryption rejection.
+  Never remove a bond because of a timeout, a weak signal or generic disconnect.
+- Receive passive presence through HA's native Bluetooth cache and supported
+  proxies, including non-connectable scanners. No active radio connection or
+  additional scanner is opened for presence tracking.
+- Preserve actual advertisement timestamps across MQTT snapshots and cache
+  polling; expire offline data and avoid stale room labels. Add room hysteresis.
+- Link an identity's tracker to its selected editable Person without replacing
+  existing GPS/Wi-Fi trackers or stealing another person's device.
+- Missing BLE reception now yields an unknown tracker state, not proven away.
+  All-receiver outages make identity entities unavailable.
+- Keep selection menus open during panel polling and redact the new last-known
+  area field from diagnostics. See docs/compatibility.md for tested boundaries.
+
+The private fresh 0.1.34 physical test completed authenticated pairing,
+protected GATT acknowledgement, HA persistence and phone completion. A standard
+0.1.35 public-flow hardware retry and the wider matrix remain release gates.
+
+## 0.1.34 - diagnostic candidate
+
+- Re-enumerate the exact Windows peer after numeric pairing succeeds and verify
+  its current paired state and authenticated protection level. The 0.1.33 live
+  test returned PAIRED with stale result protection NONE, while a fresh Windows
+  query confirmed ENCRYPTION_AND_AUTHENTICATION. The old gate stopped enrollment
+  before attempting the protected app acknowledgement.
+- Do not treat a successful pairing status alone as enrollment. Weak/unpaired
+  peers and failed verification remain errors; the protected GATT exchange and
+  Home Assistant identity commit are still required and await a new live test.
+
+## 0.1.33 - diagnostic candidate
+
+- Add owner-preauthorized receiver consent for one exact diagnostic QR session,
+  only after the app proves possession of that QR. The iPhone must still accept
+  the Bluetooth request; protected GATT acknowledgement and HA commit remain
+  mandatory. No visual PIN comparison is claimed for this opt-in mode.
+- This is not default consent for other devices or public proof of compatibility.
+  The previous numeric-comparison tests expired awaiting user confirmations.
+
+## 0.1.32 - diagnostic candidate
+
+- Add an opt-in, one-QR numeric-comparison experiment. Request authenticated
+  encryption before the protected acknowledgement; never fall back to Just Works
+  or accept a comparison PIN without explicit, nonce-bound human confirmation.
+- Do not change normal enrollment when the diagnostic is not armed. Preserve
+  existing bonds on failure and require the actual protected app acknowledgement
+  before Home Assistant can commit an identity.
+- The encrypted ATT authentication rejection remains unproven as resolved.
+  This version is prepared for a physical comparison test, not public release.
+
+## 0.1.31 - release candidate
+
+- Stop immediately if the stronger GATT authentication request fails. Windows
+  may return Unreachable locally without sending another ATT request; retrying
+  that request did not repair the authenticated channel during physical tests.
+- Bound all post-bond protected-write recovery attempts, including non-ATT
+  errors, to three attempts per phone. Preserve the bond and reject enrollment.
+- Receiver 0.1.30 failed physical fresh enrollment. Public release remains on
+  hold; this change fixes the retry regression, not the underlying iPhone
+  authentication rejection.
+
+## 0.1.30 - release candidate
+
+- On ATT insufficient authentication after bonding, request encrypted and
+  authenticated GATT access once before repeating the same connection. Keep
+  that stronger requirement on reconnect, bound it by the existing deadline,
+  preserve cancellation and require an actual successful protected write.
+
+- Add a QR-scoped failure receipt for app-aware receivers. Stop progress
+  heartbeats before publishing a terminal Bluetooth error, then advertise a
+  domain-separated negative receipt within the existing attempt deadline.
+  This never substitutes for encrypted acknowledgement or creates an identity.
+- The corresponding Presence Pair app update is required to display the error
+  immediately. The receiver changes alone cannot update an installed app.
+- Driver evidence confirms link encryption was active before ATT 0x05. Physical
+  validation of the stronger authentication recovery is still required; local
+  protocol tests are not evidence of successful enrollment.
+
+## 0.1.29 - release candidate
+
+- After an unreadable session or claim, force fresh discovery for that phone
+  rather than repeatedly accepting its cached service/characteristic list.
+  Read operations have a ten-second bound and preserve cancellation and bonds.
+- Distinguish terminal link/encryption errors from actual pairing deadlines in
+  the helper and Home Assistant status. Neither condition commits an identity.
+- Physical fresh enrollment and saved-bond reuse remain release gates.
+
+## 0.1.28 - release candidate
+
+- Add an explicit fresh-pairing test reset utility. Verify exact-phone Windows
+  bond/key absence before a test QR; keep normal saved-bond enrollment unchanged.
+- Restore Bleak's default, cancellable WinRT service discovery. The optional
+  internal Services Changed retry loop could leave child discovery requests
+  pending after a route timed out.
+- Limit modern iPhone discovery to the QR-selected service; prefer an uncached
+  targeted lookup initially and a cached targeted lookup after a confirmed bond.
+  Do not enumerate unrelated Apple services or pair again during discovery.
+- Preserve saved bonds on discovery timeouts and missing services. Only the
+  QR-verified secure-exchange error path may request targeted bond repair.
+- Bound failed post-bond rediscovery to two clean attempts and report a precise
+  incomplete-link error rather than cycling through every cache permutation.
+- Keep GATT timing and link metadata, but omit protocol payloads from debug
+  logging and preserve the actual protected-write error status.
+- Physical confirmation remains required before publication.
+
+## 0.1.27 - release candidate
+
+- Explicitly require WinRT GATT link encryption before writing the verified
+  iPhone acknowledgement, preserving any stronger authentication requirement.
+- Stop after three repeated ATT authentication/encryption rejections for the
+  same phone instead of reconnecting until the five-minute deadline. A saved
+  Windows bond alone still cannot complete enrollment.
+- Surface a terminal encryption diagnostic without automatically erasing a
+  bond or requesting repeated pairing consent.
+- Consume completed helper cleanup tasks as well as cancelled pending tasks
+  so cleanup exceptions cannot obscure the original Bluetooth failure.
+- Windows receiver deployed without restarting HA; 102 local tests pass.
+  Fresh pairing and saved-bond reuse remain mandatory physical release gates.
 
 ## 0.1.26 - release candidate
 

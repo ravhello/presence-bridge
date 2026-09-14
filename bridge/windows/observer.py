@@ -40,10 +40,11 @@ from reverse_gatt_client import (
     ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
+    ReverseGattTimeoutError,
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.26"
+BRIDGE_VERSION = "0.1.36"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -973,6 +974,7 @@ class BlePresenceObserver:
                 "iphone_session_verified": "bonding",
                 "iphone_bond_ready": "bonding",
                 "iphone_bond_settling": "bonding",
+                "iphone_authentication_required": "bonding",
                 "iphone_claim_received": "bonding",
                 "iphone_claim_rejected": "waiting_for_app",
                 "iphone_claim_accepted": "bonding",
@@ -1128,13 +1130,35 @@ class BlePresenceObserver:
                 "The secure bond completed, but its Windows IRK could not be identified"
             )
         except ReverseGattError as exc:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task
+                heartbeat_task = None
             self._publish_pairing_status(
                 link.session_id,
-                "timeout",
+                exc.terminal_state,
                 str(exc),
                 detail_code=exc.detail_code,
                 transport=pairing_transport,
             )
+            if (
+                self.config.interactive_pairing_task
+                and self._app_attempt_expires_at
+                and self._app_attempt_expires_at > time.time()
+            ):
+                try:
+                    await self._run_interactive_app_pairing(
+                        link,
+                        timeout_seconds,
+                        gatt,
+                        lambda *_a, **_k: None,
+                        failure_receipt=True,
+                    )
+                except Exception:
+                    LOGGER.warning(
+                        "Unable to send the terminal failure receipt", exc_info=True
+                    )
         except asyncio.CancelledError:
             self._publish_pairing_status(
                 link.session_id,
@@ -1167,8 +1191,12 @@ class BlePresenceObserver:
         progress_callback: Any,
         *,
         completion_receipt: bool = False,
+        failure_receipt: bool = False,
     ) -> ReverseGattResult:
         """Delegate WinRT GATT to the logged-in user's Bluetooth session."""
+        if completion_receipt and failure_receipt:
+            raise ValueError("Conflicting terminal receipts")
+        receipt = completion_receipt or failure_receipt
         command_path = Path(self.config.interactive_pairing_command_path)
         result_path = Path(self.config.interactive_pairing_result_path)
         command_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1183,7 +1211,9 @@ class BlePresenceObserver:
                     "session_id": link.session_id,
                     "pairing_uri": link.to_uri(),
                     "timeout_seconds": timeout_seconds,
-                    "transport": "completion_beacon"
+                    "transport": "failure_beacon"
+                    if failure_receipt
+                    else "completion_beacon"
                     if completion_receipt
                     else APP_PAIRING_TRANSPORT,
                     "attempt_expires_at": self._app_attempt_expires_at,
@@ -1222,7 +1252,7 @@ class BlePresenceObserver:
         last_update: tuple[str, str] | None = None
         started_at = time.monotonic()
         attempt_deadline: float | None = (
-            self._app_attempt_expires_at if completion_receipt else None
+            self._app_attempt_expires_at if receipt else None
         )
         if attempt_deadline is not None:
             deadline = time.monotonic() + max(0, attempt_deadline - time.time())
@@ -1306,7 +1336,7 @@ class BlePresenceObserver:
                         secure_exchange_complete = (
                             payload.get("secure_exchange_complete") is True
                         )
-                        if not completion_receipt and not secure_exchange_complete:
+                        if not receipt and not secure_exchange_complete:
                             raise ReverseGattError(
                                 "The iPhone has not confirmed the encrypted Bluetooth exchange",
                                 "iphone_secure_exchange_missing",
@@ -1326,11 +1356,16 @@ class BlePresenceObserver:
                             secure_exchange_complete=secure_exchange_complete,
                         )
                     elif state == "error":
-                        raise ReverseGattError(message, detail_code)
+                        error_type = (
+                            ReverseGattTimeoutError
+                            if payload.get("failure_state") == "timeout"
+                            else ReverseGattError
+                        )
+                        raise error_type(message, detail_code)
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(0.35)
-            raise ReverseGattError(
+            raise ReverseGattTimeoutError(
                 "The logged-in Windows Bluetooth session timed out",
                 "interactive_receiver_timeout",
             )
@@ -1462,6 +1497,7 @@ class BlePresenceObserver:
                 ]
             },
             "seen_monotonic": time.monotonic(),
+            "seen_at": datetime.now(UTC).isoformat(),
         }
 
     def publish_snapshot(self) -> None:

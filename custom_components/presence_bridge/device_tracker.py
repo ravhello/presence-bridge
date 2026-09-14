@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from homeassistant.components.device_tracker import BaseScannerEntity, SourceType
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN, SIGNAL_IDENTITIES_UPDATED, SIGNAL_STATE_UPDATED
 from .coordinator import PresenceBridgeCoordinator
 from .entity import PresenceBridgeIdentityEntity
+from .person_link import async_link_tracker
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
@@ -52,6 +55,32 @@ class PresenceBridgeTracker(PresenceBridgeIdentityEntity, BaseScannerEntity):
                 self.async_write_ha_state,
             )
         )
+        if self.hass.is_running:
+            await self._async_link_person()
+        else:
+            self.async_on_remove(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, self._async_link_person
+                )
+            )
+
+    async def _async_link_person(self, _event=None) -> None:
+        row = self.coordinator.memory.get("identities", {}).get(self.identity_id)
+        if not row or row.get("person_link_completed"):
+            return
+        try:
+            await async_link_tracker(self.hass, row["person_entity_id"], self.entity_id)
+        except HomeAssistantError as error:
+            row["person_link_status"] = str(error)
+        else:
+            row["person_link_completed"] = True
+            row["person_link_status"] = "linked"
+        await self.coordinator.store.async_save(self.coordinator.memory)
+
+    @property
+    def state(self) -> str | None:
+        # Missing radio coverage must not override GPS/Wi-Fi as proven absence.
+        return "home" if self.is_connected else None
 
     @property
     def is_connected(self) -> bool:
