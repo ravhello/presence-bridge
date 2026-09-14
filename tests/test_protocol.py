@@ -19,6 +19,7 @@ from protocol import (
     acceptance_proof,
     claim_proof,
     completion_service_uuid,
+    failure_service_uuid,
     pairing_service_uuid,
     preflight_service_uuid,
     verify_claim,
@@ -85,6 +86,23 @@ def test_completion_receipt_is_unique_and_domain_separated() -> None:
     assert (
         PairingLink.from_uri(LINK.to_uri(), now=NOW + 999, allow_expired=True) == LINK
     )
+
+
+def test_failure_receipt_cannot_be_confused_with_success_or_another_session():
+    failed = failure_service_uuid(LINK)
+    assert failed == "f2dbebff-694c-51ce-8918-f2a2d0641f74"
+    assert failed not in {
+        completion_service_uuid(LINK),
+        preflight_service_uuid(LINK),
+        pairing_service_uuid(LINK),
+    }
+    for other in (
+        replace(LINK, session_id="different_session_1234"),
+        replace(LINK, observer_id="other_receiver"),
+        replace(LINK, expires_at=LINK.expires_at + 1),
+        replace(LINK, secret=b"\xff" * 32),
+    ):
+        assert failure_service_uuid(other) != failed
 
 
 def test_expired_invitation_is_rejected() -> None:

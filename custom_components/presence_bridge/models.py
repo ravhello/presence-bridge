@@ -33,4 +33,5 @@ class IdentityState:
     observer_name: str | None = None
     area_id: str | None = None
     rssi: int | None = None
+    signal_seen_at: datetime | None = None
     last_seen: datetime | None = None

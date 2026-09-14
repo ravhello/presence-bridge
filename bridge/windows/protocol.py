@@ -163,6 +163,19 @@ def completion_service_uuid(link: PairingLink) -> str:
     return str(uuid.UUID(bytes=bytes(raw)))
 
 
+def failure_service_uuid(link: PairingLink) -> str:
+    """Authenticate a terminal failure without pretending enrollment succeeded."""
+    link.validate(allow_expired=True)
+    message = (
+        f"presence-bridge-failed:v{link.version}\n{link.session_id}\n"
+        f"{link.observer_id}\n{link.expires_at}"
+    ).encode("ascii")
+    raw = bytearray(hmac.new(link.secret, message, hashlib.sha256).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x50
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(raw)))
+
+
 def claim_proof(link: PairingLink) -> str:
     """Build the app's HMAC proof without transmitting the QR secret."""
     link.validate(allow_expired=True)

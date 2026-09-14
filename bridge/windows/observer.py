@@ -23,7 +23,7 @@ import signal
 import sys
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -34,15 +34,17 @@ from bleak import BleakScanner
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from identity_removal import BondDevice, remove_identity_bonds
 from protocol import PairingLink, ProtocolError, b64url_decode
 from reverse_gatt_client import (
     ReverseGattError,
     ReverseGattPairingClient,
     ReverseGattResult,
+    ReverseGattTimeoutError,
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.25"
+BRIDGE_VERSION = "0.1.36"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -54,7 +56,6 @@ MIN_PAIRING_TIMEOUT_SECONDS = 60
 SCANNER_PAUSE_TIMEOUT_SECONDS = 10.0
 PAIRING_HEARTBEAT_SECONDS = 10.0
 APP_PAIRING_TRANSPORT = "iphone_peripheral"
-PAIRING_ACK_RECONNECT_GRACE_SECONDS = 30.0
 
 
 def mqtt_reason_is_failure(reason_code: Any) -> bool:
@@ -90,15 +91,7 @@ def scan_session_is_stale(
     return now - max(session_started, last_detection) >= timeout
 
 
-def pairing_ack_fallback_ready(first_seen: float | None, now: float) -> bool:
-    """Allow IRK-only completion only after the iPhone ACK had time to reconnect."""
-    return (
-        first_seen is not None
-        and now - first_seen >= PAIRING_ACK_RECONNECT_GRACE_SECONDS
-    )
-
-
-def read_windows_private_ble_irks() -> list[dict[str, str]]:
+def read_windows_private_ble_irks(*, strict: bool = False) -> list[dict[str, str]]:
     """Read Windows Bluetooth IRKs while running as LOCAL SYSTEM."""
     if sys.platform != "win32":
         return []
@@ -113,7 +106,9 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         while True:
             try:
                 value_name, value, _value_type = winreg.EnumValue(key, value_index)
-            except OSError:
+            except OSError as error:
+                if strict and getattr(error, "winerror", None) != 259:
+                    raise
                 break
             value_index += 1
             normalized_name = value_name.casefold()
@@ -136,13 +131,17 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         while True:
             try:
                 child_name = winreg.EnumKey(key, child_index)
-            except OSError:
+            except OSError as error:
+                if strict and getattr(error, "winerror", None) != 259:
+                    raise
                 break
             child_index += 1
             try:
                 with winreg.OpenKey(key, child_name, 0, winreg.KEY_READ) as child:
                     visit(child, f"{relative_path}\\{child_name}", depth + 1)
             except OSError:
+                if strict:
+                    raise
                 continue
 
     try:
@@ -154,6 +153,8 @@ def read_windows_private_ble_irks() -> list[dict[str, str]]:
         ) as root:
             visit(root, PRIVATE_BLE_REGISTRY_PATH)
     except OSError:
+        if strict:
+            raise
         return []
     return records
 
@@ -523,11 +524,13 @@ class MqttPublisher:
         except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
             return
         if isinstance(payload, dict) and self.command_handler is not None:
+            if payload.get("action") == "forget_identity" and message.retain:
+                return
             self.command_handler(payload)
 
     def status_payload(self, *, online: bool) -> dict[str, Any]:
         """Describe this bridge without exposing local credentials."""
-        capabilities = ["scanner", "manual_pairing"]
+        capabilities = ["scanner", "manual_pairing", "identity_removal"]
         if self.config.app_pairing_enabled:
             capabilities.append("app_pairing")
         return {
@@ -618,6 +621,7 @@ class BlePresenceObserver:
         self._active_pairing_session_id: str | None = None
         self._ha_pairing_committed = asyncio.Event()
         self._app_attempt_expires_at: float | None = None
+        self._removal_results: dict[str, dict[str, Any]] = {}
         self._scanner_pause_requested = asyncio.Event()
         self._scanner_stopped = asyncio.Event()
         self._scanner_stopped.set()
@@ -702,6 +706,9 @@ class BlePresenceObserver:
             payload = await self._pairing_commands.get()
             action = str(payload.get("action") or "").strip().lower()
             session_id = str(payload.get("session_id") or "").strip()
+            if action == "forget_identity":
+                await self._run_identity_removal(payload)
+                continue
             if action == "complete":
                 if (
                     session_id == self._active_pairing_session_id
@@ -790,6 +797,148 @@ class BlePresenceObserver:
                     self._run_pairing_session(session_id, public_key, timeout)
                 )
 
+    async def _run_identity_removal(self, payload: dict[str, Any]) -> None:
+        request_id = str(payload.get("request_id") or "")
+        fingerprint = str(payload.get("fingerprint") or "")
+        identity_id = str(payload.get("identity_id") or "")
+        try:
+            expires_at = float(payload.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            return
+        if (
+            not PAIRING_SESSION_ID_RE.fullmatch(request_id)
+            or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+            or identity_id != fingerprint[:16]
+            or not time.time() < expires_at <= time.time() + 90
+            or payload.get("observer_id") != self.config.observer_id
+        ):
+            return
+        cached = self._removal_results.get(request_id)
+        if cached is not None:
+            if cached["fingerprint"] == fingerprint:
+                self.mqtt.publish_bridge_json(
+                    "identity_removal/result", cached, retain=False
+                )
+            return
+        result = {
+            "request_id": request_id,
+            "identity_id": identity_id,
+            "fingerprint": fingerprint,
+            "observer_id": self.config.observer_id,
+            "success": False,
+        }
+        paused = False
+        try:
+            if (
+                self._active_pairing_task is not None
+                and not self._active_pairing_task.done()
+            ):
+                raise RuntimeError(
+                    "Finish or cancel the active pairing before removing a phone"
+                )
+            await self._pause_scanner_for_pairing()
+            paused = True
+            self._publish_observer_heartbeat()
+            journal = Path(self.config.interactive_pairing_command_path).with_name(
+                "identity-removals.json"
+            )
+            count = await remove_identity_bonds(
+                fingerprint,
+                lambda: read_windows_private_ble_irks(strict=True),
+                journal,
+                (
+                    lambda targets: self._run_interactive_identity_removal(
+                        request_id, targets
+                    )
+                )
+                if self.config.interactive_pairing_task
+                else None,
+            )
+            result.update(success=True, removed_bonds=count)
+            LOGGER.info(
+                "Phone removed: Windows bonds and private key verified absent (%s endpoints)",
+                count,
+            )
+        except Exception as error:
+            result["message"] = str(error) or type(error).__name__
+            LOGGER.warning("Phone removal failed: %s", result["message"])
+        finally:
+            if paused:
+                self._resume_scanner_after_pairing()
+        self._removal_results[request_id] = result
+        while len(self._removal_results) > 32:
+            self._removal_results.pop(next(iter(self._removal_results)))
+        self.mqtt.publish_bridge_json("identity_removal/result", result, retain=False)
+
+    async def _run_interactive_identity_removal(
+        self, request_id: str, targets: list[BondDevice]
+    ) -> None:
+        """Use the signed-in Bluetooth broker; SYSTEM still verifies the final keys."""
+        command_path = Path(self.config.interactive_pairing_command_path)
+        result_path = Path(self.config.interactive_pairing_result_path)
+
+        async def task_command(action: str, *, required: bool) -> None:
+            process = await asyncio.create_subprocess_exec(
+                "schtasks.exe",
+                action,
+                "/TN",
+                self.config.interactive_pairing_task,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+            if required and process.returncode != 0:
+                detail = (stderr or stdout).decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"Windows Bluetooth removal helper unavailable: {detail}"
+                )
+
+        await task_command("/End", required=False)
+        result_path.unlink(missing_ok=True)
+        temporary = command_path.with_suffix(command_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "session_id": request_id,
+                    "transport": "identity_removal",
+                    "attempt_expires_at": time.time() + 40,
+                    "targets": [asdict(target) for target in targets],
+                }
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(command_path)
+        try:
+            await task_command("/Run", required=True)
+            async with asyncio.timeout(40):
+                while True:
+                    try:
+                        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+                    except (OSError, json.JSONDecodeError):
+                        result = {}
+                    if (
+                        isinstance(result, dict)
+                        and result.get("session_id") == request_id
+                    ):
+                        if result.get("state") == "error":
+                            raise RuntimeError(
+                                str(result.get("message") or "Windows removal failed")
+                            )
+                        if result.get("state") == "success":
+                            if result.get("removed_target_ids") != [
+                                target.device_id for target in targets
+                            ]:
+                                raise RuntimeError(
+                                    "Windows removal helper target mismatch"
+                                )
+                            return
+                    await asyncio.sleep(0.2)
+        finally:
+            await task_command("/End", required=False)
+            command_path.unlink(missing_ok=True)
+            result_path.unlink(missing_ok=True)
+
     async def _run_app_pairing_session(
         self,
         link: PairingLink,
@@ -825,6 +974,7 @@ class BlePresenceObserver:
                 "iphone_session_verified": "bonding",
                 "iphone_bond_ready": "bonding",
                 "iphone_bond_settling": "bonding",
+                "iphone_authentication_required": "bonding",
                 "iphone_claim_received": "bonding",
                 "iphone_claim_rejected": "waiting_for_app",
                 "iphone_claim_accepted": "bonding",
@@ -834,7 +984,7 @@ class BlePresenceObserver:
                 "iphone_connection_retry": "connecting",
                 "iphone_signal_too_weak": "connecting",
                 "iphone_bond_reset": "bonding",
-                "existing_bond_resolved": "bonding",
+                "iphone_bond_refresh": "connecting",
                 "legacy_receiver_advertising": "waiting_for_app",
                 "windows_adapter_recovering": "waiting_for_app",
             }
@@ -905,18 +1055,16 @@ class BlePresenceObserver:
                     progress_callback=publish_progress,
                 )
                 peer = await client.async_pair(link, timeout_seconds)
-            reused_bond = peer.transport == "existing_windows_bond"
+            if not peer.secure_exchange_complete:
+                raise ReverseGattError(
+                    "The saved Windows identity is not proof of a working Bluetooth bond",
+                    "iphone_secure_exchange_missing",
+                )
             self._publish_pairing_status(
                 link.session_id,
                 "bonding",
-                (
-                    "Existing Windows bond recognized; capturing the private identity"
-                    if reused_bond
-                    else "Encrypted claim accepted; capturing the private identity"
-                ),
-                detail_code=(
-                    "existing_bond_resolved" if reused_bond else "iphone_claim_accepted"
-                ),
+                "Encrypted claim accepted; capturing the private identity",
+                detail_code="iphone_claim_accepted",
                 transport=peer.transport,
             )
             remaining = (self._app_attempt_expires_at or time.time()) - time.time()
@@ -982,13 +1130,35 @@ class BlePresenceObserver:
                 "The secure bond completed, but its Windows IRK could not be identified"
             )
         except ReverseGattError as exc:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task
+                heartbeat_task = None
             self._publish_pairing_status(
                 link.session_id,
-                "timeout",
+                exc.terminal_state,
                 str(exc),
                 detail_code=exc.detail_code,
                 transport=pairing_transport,
             )
+            if (
+                self.config.interactive_pairing_task
+                and self._app_attempt_expires_at
+                and self._app_attempt_expires_at > time.time()
+            ):
+                try:
+                    await self._run_interactive_app_pairing(
+                        link,
+                        timeout_seconds,
+                        gatt,
+                        lambda *_a, **_k: None,
+                        failure_receipt=True,
+                    )
+                except Exception:
+                    LOGGER.warning(
+                        "Unable to send the terminal failure receipt", exc_info=True
+                    )
         except asyncio.CancelledError:
             self._publish_pairing_status(
                 link.session_id,
@@ -1021,8 +1191,12 @@ class BlePresenceObserver:
         progress_callback: Any,
         *,
         completion_receipt: bool = False,
+        failure_receipt: bool = False,
     ) -> ReverseGattResult:
         """Delegate WinRT GATT to the logged-in user's Bluetooth session."""
+        if completion_receipt and failure_receipt:
+            raise ValueError("Conflicting terminal receipts")
+        receipt = completion_receipt or failure_receipt
         command_path = Path(self.config.interactive_pairing_command_path)
         result_path = Path(self.config.interactive_pairing_result_path)
         command_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1037,7 +1211,9 @@ class BlePresenceObserver:
                     "session_id": link.session_id,
                     "pairing_uri": link.to_uri(),
                     "timeout_seconds": timeout_seconds,
-                    "transport": "completion_beacon"
+                    "transport": "failure_beacon"
+                    if failure_receipt
+                    else "completion_beacon"
                     if completion_receipt
                     else APP_PAIRING_TRANSPORT,
                     "attempt_expires_at": self._app_attempt_expires_at,
@@ -1074,12 +1250,12 @@ class BlePresenceObserver:
             time.monotonic() + max(1, link.expires_at - int(time.time())),
         )
         last_update: tuple[str, str] | None = None
+        started_at = time.monotonic()
         attempt_deadline: float | None = (
-            self._app_attempt_expires_at if completion_receipt else None
+            self._app_attempt_expires_at if receipt else None
         )
         if attempt_deadline is not None:
             deadline = time.monotonic() + max(0, attempt_deadline - time.time())
-        existing_bond_seen_at: float | None = None
         try:
             while True:
                 if result_path.is_file():
@@ -1098,12 +1274,6 @@ class BlePresenceObserver:
                         payload.get("detail_code") or "interactive_pairing"
                     )
                     message = str(payload.get("message") or detail_code)
-                    matched_address = normalize_address(
-                        str(payload.get("matched_address") or "")
-                    )
-                    session_scoped_advertisement = (
-                        payload.get("session_scoped_advertisement") is True
-                    )
                     reported_lease: dict[str, int] = {}
                     try:
                         reported_rssi = int(payload.get("rssi"))
@@ -1156,58 +1326,46 @@ class BlePresenceObserver:
                     update = (detail_code, message)
                     if state == "progress" and update != last_update:
                         last_update = update
-                        progress_callback(detail_code, message, **reported_lease)
-                    if (
-                        state == "progress"
-                        and detail_code
-                        in {
-                            "iphone_connection_retry",
-                            "iphone_connection_failed",
-                            "iphone_signal_too_weak",
-                        }
-                        and session_scoped_advertisement
-                        and matched_address
-                    ):
-                        record = select_irk_record_for_address(
-                            await asyncio.to_thread(read_windows_private_ble_irks),
-                            matched_address,
+                        LOGGER.info(
+                            "Pairing helper step=%s elapsed=%.1fs",
+                            detail_code,
+                            time.monotonic() - started_at,
                         )
-                        if record is not None:
-                            if existing_bond_seen_at is None:
-                                existing_bond_seen_at = now_monotonic
-                                progress_callback(
-                                    "iphone_bond_settling",
-                                    "Bluetooth bond accepted; waiting for the iPhone confirmation channel",
-                                )
-                            elif pairing_ack_fallback_ready(
-                                existing_bond_seen_at,
-                                now_monotonic,
-                            ):
-                                progress_callback(
-                                    "existing_bond_resolved",
-                                    "The QR-matched iPhone already has a valid Windows bond; reusing it",
-                                )
-                                return ReverseGattResult(
-                                    address=matched_address,
-                                    name=str(
-                                        payload.get("name") or "Presence Pair iPhone"
-                                    ),
-                                    transport="existing_windows_bond",
-                                )
-                    elif state == "success":
+                        progress_callback(detail_code, message, **reported_lease)
+                    if state == "success":
+                        secure_exchange_complete = (
+                            payload.get("secure_exchange_complete") is True
+                        )
+                        if not receipt and not secure_exchange_complete:
+                            raise ReverseGattError(
+                                "The iPhone has not confirmed the encrypted Bluetooth exchange",
+                                "iphone_secure_exchange_missing",
+                            )
+                        LOGGER.info(
+                            "Pairing helper finished encrypted_exchange=%s receipt=%s elapsed=%.1fs",
+                            secure_exchange_complete,
+                            completion_receipt,
+                            time.monotonic() - started_at,
+                        )
                         return ReverseGattResult(
                             address=str(payload.get("address") or ""),
                             name=str(payload.get("name") or "Presence Pair iPhone"),
                             transport=str(
                                 payload.get("transport") or APP_PAIRING_TRANSPORT
                             ),
+                            secure_exchange_complete=secure_exchange_complete,
                         )
                     elif state == "error":
-                        raise ReverseGattError(message, detail_code)
+                        error_type = (
+                            ReverseGattTimeoutError
+                            if payload.get("failure_state") == "timeout"
+                            else ReverseGattError
+                        )
+                        raise error_type(message, detail_code)
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(0.35)
-            raise ReverseGattError(
+            raise ReverseGattTimeoutError(
                 "The logged-in Windows Bluetooth session timed out",
                 "interactive_receiver_timeout",
             )
@@ -1339,6 +1497,7 @@ class BlePresenceObserver:
                 ]
             },
             "seen_monotonic": time.monotonic(),
+            "seen_at": datetime.now(UTC).isoformat(),
         }
 
     def publish_snapshot(self) -> None:

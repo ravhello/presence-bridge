@@ -17,18 +17,31 @@ login. Use a Windows version receiving security updates.
 
 ## 2. Install the free integration
 
+The current release is the **0.1.36 public preview**. Presence Pair is still in
+TestFlight, not yet on the public App Store. You need access to that app for
+initial enrollment. This repository can be installed through HACS as a custom
+repository; it is not a default catalog listing.
+
 1. In HACS, open **Integrations**.
 2. From the three-dot menu, select **Custom repositories**.
 3. Enter `https://github.com/ravhello/presence-bridge`, choose
    **Integration**, and confirm.
-4. Install **Presence Bridge** and restart Home Assistant.
+4. Enable pre-releases for this repository, select **v0.1.36**, install
+   **Presence Bridge**, and restart Home Assistant. HACS normally excludes betas;
+   see its [pre-release switch documentation](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 
+Alternatively, extract the release's `presence_bridge-0.1.36.zip` into
+`<HA config>/custom_components/presence_bridge/`. Its `manifest.json` must sit
+directly in that folder. Back up HA before updating; then restart and add the
+integration as above. Use the matching 0.1.36 Windows receiver package.
+
 ## 3. Prepare the Windows observer
 
-Download and extract the latest repository release. On the fixed Windows
-computer, open PowerShell **as Administrator** in `bridge\windows` and run:
+Download and extract `presence-bridge-windows-VERSION.zip` from the matching
+release. On the fixed Windows computer, open PowerShell **as Administrator** in
+the extracted folder containing `install.ps1` and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -74,6 +87,19 @@ cover proximity, retries, bond reuse and HA verification; no phase resets the ti
 
 ## 5. Verify the result
 
+The iPhone does not need Wi-Fi for Bluetooth pairing. The Windows receiver
+still needs network access to HA and MQTT; Ethernet works. An already valid
+bond may complete without another iOS Pair prompt. Completion still requires
+the protected Bluetooth acknowledgement and HA storage.
+
+For optional live dBm readings on the phone, use **Live signal in the app** in
+the Presence Bridge panel, choose the paired person and scan that separate QR.
+This is read-only HTTPS access to HA, not another Bluetooth pairing. The phone
+needs a route to your HA server for this monitor; on the usual private LAN,
+use Wi-Fi or your existing secure VPN. No public port needs to be opened.
+Measurements show their age and expire when no fresh sample is received.
+**Revoke signal access** revokes the monitor without removing the Bluetooth bond.
+
 Home Assistant creates three entities for each paired phone:
 
 - a presence binary sensor;
@@ -85,6 +111,20 @@ on and the room sensor shows the assigned area. With multiple observers, assign
 each one to its area and repeat the check while moving between rooms.
 
 ## 6. Update or remove
+
+To dissociate a phone, remove its identity from the Presence Bridge panel.
+Starting with 0.1.26, this also removes its saved Bluetooth pairing on the
+Windows receiver that enrolled it. Keep that receiver online with its Windows
+account signed in; the short-lived helper handles removal without a Windows
+prompt. HA removes the identity only after the receiver verifies that the
+selected phone's BLE/classic bonds and private key are absent. Other phones
+and Wi-Fi assignments are not affected. If removal fails, keep the HA identity
+and retry once the reported receiver problem is resolved.
+
+For a completely fresh test, also use **Forget This Device** for the receiver in
+the iPhone's Bluetooth settings if it is still listed. HA cannot remotely clear
+iOS's saved-device list. Do not erase unrelated Bluetooth devices or reset the
+whole adapter. Then generate a new QR when ready to scan.
 
 Update the integration from HACS. For a Windows observer, rerun `install.ps1`
 from the new release while keeping its existing ID. The installer stops the old

@@ -9,6 +9,7 @@ class PresenceBridgePanel extends HTMLElement {
     this._clock = null;
     this._selectedPerson = "";
     this._selectedObserver = "";
+    this._monitor = null;
   }
 
   set hass(value) {
@@ -56,6 +57,8 @@ class PresenceBridgePanel extends HTMLElement {
 
   render() {
     if (!this.shadowRoot) return;
+    // Background status polling must not close a native selection menu.
+    if (this.shadowRoot.activeElement?.tagName === "SELECT") return;
     this._selectedPerson = this.shadowRoot.querySelector("#person")?.value || this._selectedPerson;
     this._selectedObserver = this.shadowRoot.querySelector("#observer")?.value || this._selectedObserver;
     const data = this._data || { people: [], observers: [], identities: [], pairing: {}, areas: [] };
@@ -134,11 +137,23 @@ class PresenceBridgePanel extends HTMLElement {
         </section>
         <section>
           <h2>${this.text("Paired identities", "Identità associate")}</h2>
-          ${data.identities.length ? `<table><thead><tr><th>${this.text("Person", "Persona")}</th><th>${this.text("Status", "Stato")}</th><th>${this.text("Room", "Stanza")}</th><th>RSSI</th><th></th></tr></thead><tbody>${data.identities.map((item) => `<tr><td>${this.escape(item.label)}</td><td><span class="dot ${item.is_home ? "on" : ""}"></span>${item.is_home ? this.text("Home", "In casa") : this.text("Away", "Fuori")}</td><td>${this.escape(item.area_name || item.observer_name || "—")}</td><td>${item.rssi ?? "—"}</td><td><button class="icon" data-action="remove" data-identity="${this.escape(item.identity_id)}" title="${this.text("Remove identity", "Rimuovi identità")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></td></tr>`).join("")}</tbody></table>` : `<span class="muted">${this.text("No paired iPhone", "Nessun iPhone associato")}</span>`}
+          ${data.identities.length ? `<table><thead><tr><th>${this.text("Person", "Persona")}</th><th>${this.text("Status", "Stato")}</th><th>${this.text("Room", "Stanza")}</th><th>RSSI</th><th></th></tr></thead><tbody>${data.identities.map((item) => `<tr><td>${this.escape(item.label)}${item.person_link_status && item.person_link_status !== "linked" ? `<div class="diagnostic">${this.escape(item.person_link_status)}</div>` : ""}</td><td><span class="dot ${item.is_home ? "on" : ""}"></span>${item.is_home ? this.text("Detected", "Rilevato") : this.text("Not detected", "Non rilevato")}</td><td>${this.escape(item.room_fresh ? (item.area_name || item.observer_name || "—") : "—")}</td><td>${item.rssi ?? "—"}</td><td><button class="icon" data-action="remove" data-identity="${this.escape(item.identity_id)}" title="${this.text("Remove identity", "Rimuovi identità")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></td></tr>`).join("")}</tbody></table>` : `<span class="muted">${this.text("No paired iPhone", "Nessun iPhone associato")}</span>`}
         </section>
+        <section><h2>${this.text("Live signal in the app", "Segnale live nell'app")}</h2><div class="actions">${data.identities.map(item => `<button class="secondary" data-action="monitor" data-identity="${this.escape(item.identity_id)}"><ha-icon icon="mdi:cellphone-wireless"></ha-icon>${this.escape(item.label)}</button><button class="icon" data-action="revoke-monitor" data-identity="${this.escape(item.identity_id)}" title="${this.text("Revoke signal access", "Revoca accesso al segnale")}"><ha-icon icon="mdi:shield-off-outline"></ha-icon></button>`).join("")}</div>
+        ${this._monitor ? `<p>${this.text("Scan with Presence Pair supporting Live signal. Read-only access for this phone, no new Bluetooth pairing. Single-use code, valid for 10 minutes.", "Scansiona con Presence Pair che supporta Segnale live. Sola lettura per questo telefono, nessun nuovo abbinamento Bluetooth. Codice monouso valido 10 minuti.")}</p><div class="qr" style="max-width:320px"><img alt="Signal access QR" src="${this.escape(this._monitor.qr_data_uri)}"></div><div class="actions"><a class="action primary" href="${this.escape(this._monitor.uri)}">${this.text("Open app", "Apri app")}</a><button class="secondary" data-action="close-monitor">${this.text("Close", "Chiudi")}</button></div>` : ""}</section>
       </main>`;
     this.bind();
     this.tickCountdowns();
+  }
+
+  async openMonitor(identity, revoke = false) {
+    if (revoke && !confirm(this.text("Revoke signal access? Bluetooth pairing is unchanged.", "Revocare l'accesso al segnale? L'abbinamento Bluetooth rimane invariato."))) return;
+    try {
+      const result = await this._hass.callWS({ type: "presence_bridge/signal_monitor", identity_id: identity, origin: location.origin, revoke });
+      this._monitor = revoke ? null : result;
+      this._error = "";
+    } catch (error) { this._error = error?.message || String(error); }
+    this.render();
   }
 
   pairingView(pairing) {
@@ -205,7 +220,7 @@ class PresenceBridgePanel extends HTMLElement {
       return {
         tone: "",
         title: this.text("Checking the distance on iPhone", "Controllo della distanza su iPhone"),
-        body: this.text("After scanning, Presence Pair shows the live Dell signal. Secure pairing stays stopped until the iPhone is close enough, then starts automatically.", "Dopo la scansione, Presence Pair mostra il segnale live del Dell. L'associazione protetta resta ferma finché l'iPhone non è abbastanza vicino, poi parte automaticamente."),
+        body: this.text("After scanning, Presence Pair shows the live receiver signal. Secure pairing stays stopped until the iPhone is close enough, then starts automatically.", "Dopo la scansione, Presence Pair mostra il segnale live del ricevitore. L'associazione protetta resta ferma finché l'iPhone non è abbastanza vicino, poi parte automaticamente."),
       };
     }
     if (pairing.detail_code === "receiver_proximity_confirmed") {
@@ -275,6 +290,9 @@ class PresenceBridgePanel extends HTMLElement {
   }
 
   bind() {
+    this.shadowRoot.querySelectorAll('[data-action="monitor"]').forEach(el => el.addEventListener("click", () => this.openMonitor(el.dataset.identity)));
+    this.shadowRoot.querySelectorAll('[data-action="revoke-monitor"]').forEach(el => el.addEventListener("click", () => this.openMonitor(el.dataset.identity, true)));
+    this.shadowRoot.querySelector('[data-action="close-monitor"]')?.addEventListener("click", () => { this._monitor = null; this.render(); });
     this.shadowRoot.querySelector('[data-action="refresh"]')?.addEventListener("click", () => this.load());
     this.shadowRoot.querySelector('[data-action="start"]')?.addEventListener("click", () => this.startPairing());
     this.shadowRoot.querySelector('[data-action="restart"]')?.addEventListener("click", (event) => this.restartPairing(event.currentTarget));
@@ -348,7 +366,8 @@ class PresenceBridgePanel extends HTMLElement {
   }
 
   async removeIdentity(element) {
-    if (!window.confirm(this.text("Remove this Bluetooth identity and its Home Assistant entities?", "Rimuovere questa identità Bluetooth e le relative entità di Home Assistant?"))) return;
+    if (!window.confirm(this.text("Unpair this phone on its Windows receiver and remove its Home Assistant association?", "Rimuovere questo telefono dagli abbinati del ricevitore Windows e dissociarlo da Home Assistant?"))) return;
+    element.disabled = true;
     try {
       await this._hass.callWS({
         type: "presence_bridge/remove_identity",
@@ -358,6 +377,8 @@ class PresenceBridgePanel extends HTMLElement {
     } catch (error) {
       this._error = error?.message || String(error);
       this.render();
+    } finally {
+      element.disabled = false;
     }
   }
 }

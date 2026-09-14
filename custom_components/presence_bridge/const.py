@@ -13,6 +13,7 @@ TOPIC_STATUS = f"{TOPIC_ROOT}/+/status"
 TOPIC_OBSERVATIONS = f"{TOPIC_ROOT}/+/observations"
 TOPIC_PAIRING_STATUS = f"{TOPIC_ROOT}/+/pairing/status"
 TOPIC_PAIRING_RESULT = f"{TOPIC_ROOT}/+/pairing/result"
+TOPIC_IDENTITY_REMOVAL_RESULT = f"{TOPIC_ROOT}/+/identity_removal/result"
 
 GATT_SERVICE_UUID = "61dd168c-4ec1-40de-a78c-ccdce5774bba"
 GATT_SESSION_UUID = "ef70387a-ba9d-4e83-9171-fea99252b57a"

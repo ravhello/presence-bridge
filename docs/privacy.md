@@ -30,12 +30,26 @@ errors and counters, not IRKs or pairing secrets.
 - camera frames while the QR scanner is visible;
 - a short-lived pairing invitation held in memory;
 - a bounded, in-memory technical pairing timeline;
+- optional live signal data fetched directly from the user's Home Assistant,
+  and a revocable, phone-scoped read-only credential in the device-only Keychain;
 - a StoreKit purchase entitlement only in paid releases (not in the current
   free compatibility release).
 
 The app does not create an account, collect analytics, access contacts, request
 location permission, or send data to a developer-operated server. Camera frames
 are not stored. Pairing invitations are discarded when they expire or complete.
+
+### Optional live signal
+
+Scanning a separate signal QR enables foreground HTTPS polling of the user's
+own HA server. The payload contains only the selected phone's label, receiver
+names, areas, RSSI and sample timestamps. This does not open a Bluetooth
+connection or upload data to the developer. Signal QR credentials are single
+use; the resulting grant expires in 90 days. HA stores credential hashes only.
+It can revoke this access without removing the Bluetooth bond. The app can
+remove its local credential; it is not synchronized through iCloud or backups.
+Do not share signal QR codes. The app does not include signal credentials or
+receiver labels in optional support diagnostics.
 
 ### Optional support reports
 
@@ -61,8 +75,15 @@ the same address. Your chosen email/share provider has its own privacy policy.
 - use a unique MQTT account and limit it to the Presence Bridge topic tree;
 - keep HA, MQTT, and observers on trusted LANs or encrypted links;
 - keep Windows and iOS security updates installed;
-- remove an identity in HA and the Windows Bluetooth bond when a phone changes
-  owner.
+- remove an identity in HA when a phone changes owner; version 0.1.26 also
+  removes its bonds on the enrolling Windows receiver before confirming.
+
+Removal commands contain a one-way identity fingerprint, not the private key.
+An unfinished removal keeps a local Windows journal of only the exact device
+IDs, Bluetooth addresses and physical container needed to retry safely. That
+entry is deleted when removal is verified. HA retains the identity until the
+owning receiver confirms that the bonds and private key are absent. This does
+not erase the iPhone's own saved-device list.
 
 ## Disclosure
 

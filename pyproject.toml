@@ -1,6 +1,6 @@
 [project]
 name = "presence-bridge-dev"
-version = "0.1.25"
+version = "0.1.36"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
@@ -20,3 +20,4 @@ ignore = ["E501", "PLR2004"]
 "bridge/windows/test_*.py" = ["S101"]
 "bridge/windows/gatt_server.py" = ["PLC0415"]
 "bridge/windows/observer.py" = ["PLC0415"]
+"bridge/windows/identity_removal.py" = ["PLC0415"]
