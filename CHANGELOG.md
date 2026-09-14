@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.36 (candidate)
+## 0.1.36 - public preview (2026-09-14)
 
 - Live per-receiver RSSI with real packet timestamps and 45-second freshness.
 - Latest rotated-address measurement replaces historical maximum RSSI.
@@ -8,6 +8,9 @@
   Bluetooth pairing, keys or Home Assistant control permissions.
 - Native HA scanner cache refresh at 5 seconds. External bridge intervals remain
   unchanged. Precise distance in meters is not claimed from RSSI.
+- Published as an opt-in GitHub pre-release with matching HA and Windows
+  archives. The final public-flow video and broader hardware matrix remain
+  pending; this does not publish the iPhone app on the App Store.
 
 All notable changes to Presence Bridge are documented here.
 

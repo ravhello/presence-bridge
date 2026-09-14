@@ -10,6 +10,18 @@ and no permanent HA credential on the phone.
 
 [Install from GitHub](https://github.com/ravhello/presence-bridge){: .btn }
 
+## Public preview 0.1.36
+
+The free integration and Windows receiver are available in the
+[0.1.36 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.1.36).
+Use the HACS custom repository with pre-releases enabled, or install the ZIP
+manually. Read the [release notes]({{ site.baseurl }}/release-0.1.36/)
+for installation, upgrade and compatibility limits.
+
+The iPhone app is still in TestFlight. This integration publication does not
+make Presence Pair available on the public App Store; new enrollment requires
+access to the app. The final demonstration and wider hardware tests are pending.
+
 ## Components
 
 **Presence Bridge for Home Assistant** is free and open source. It resolves

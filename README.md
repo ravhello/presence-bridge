@@ -1,5 +1,13 @@
 # Presence Bridge
 
+**Public preview 0.1.36** is available as a free
+[GitHub pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.1.36).
+Install it through a HACS custom repository with pre-releases enabled, or use
+the manual package. This is not a default HACS catalog listing or a claim of
+universal hardware support. Presence Pair for iPhone is still in TestFlight;
+its public App Store release is pending Apple review. Initial enrollment needs
+access to the iPhone app.
+
 [![Validate](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml/badge.svg)](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml)
 [![Release](https://img.shields.io/github/v/release/ravhello/presence-bridge?display_name=tag)](https://github.com/ravhello/presence-bridge/releases)
 
@@ -51,17 +59,26 @@ tracker state, not proof that the person left home.
 1. In HACS, open **Integrations**, then the three-dot menu and
    **Custom repositories**.
 2. Add `https://github.com/ravhello/presence-bridge` as an Integration.
-3. Install **Presence Bridge** and restart Home Assistant.
+3. Enable pre-releases for this repository, select **v0.1.36**, install
+   **Presence Bridge**, and restart Home Assistant.
 4. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 
-For manual installation, copy `custom_components/presence_bridge` into the
-matching directory under the Home Assistant configuration folder and restart.
+HACS excludes pre-releases by default; see its
+[pre-release switch documentation](https://www.hacs.xyz/docs/use/entities/switch/).
+Use the exact version above rather than an older default release.
+
+For manual installation, extract `presence_bridge-0.1.36.zip` into
+`<HA config>/custom_components/presence_bridge/` and restart. The ZIP is flat:
+`manifest.json` must be directly inside that directory, not another nested
+folder. Back up HA before updating an existing installation.
 
 ## Install a Windows observer
 
-Create a dedicated MQTT user first. On the Windows computer, open PowerShell as
-Administrator in `bridge/windows` and run:
+Create a dedicated MQTT user first. Download the matching
+`presence-bridge-windows-0.1.36.zip` from the release and extract it. On the
+Windows computer, open PowerShell as Administrator in the extracted folder
+containing `install.ps1` and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -109,10 +126,12 @@ credentials, does not use analytics, and does not transmit location data. See
 ## Status
 
 The public protocol and integration are in preview. See the
-[changelog](CHANGELOG.md) for release scope. Presence Pair App Store availability
-is tracked in the project releases.
+[release notes](docs/release-0.1.36.md), [compatibility matrix](docs/compatibility.md),
+and [changelog](CHANGELOG.md) for tested scope and remaining physical checks.
+Presence Pair App Store availability is separate from this integration release.
 
 ## License
 
 Presence Bridge is released under the MIT License. Presence Pair is a separate
-commercial application and is not covered by this repository's license.
+proprietary application, currently free during compatibility testing, and is
+not covered by this repository's license.

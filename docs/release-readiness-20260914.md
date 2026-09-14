@@ -1,5 +1,10 @@
 # Release candidate 0.1.36: validation record
 
+Publication update: the maintainer authorized a **public preview** on
+2026-09-14, before the final video. The tested software and archives are
+unchanged. This lifts the draft-only hold, not the stable-release hardware
+gates below. See [public release notes](release-0.1.36.md).
+
 ## Verified locally on 2026-09-14
 
 - 180 Python tests pass, including saved-bond handling, authenticated ACK gates,
@@ -29,8 +34,8 @@ The final public-flow fresh pairing video, the new iOS monitor's physical
 Keychain/TLS test, a clean install on another Windows host, and a wider adapter/
 phone matrix remain hardware gates. Unit tests and a working saved identity do
 not certify those cases. Native HA radios support passive observations, not
-initial iPhone enrollment. Keep this release a candidate until the physical
-demonstration passes; do not relabel it universally compatible.
+initial iPhone enrollment. Keep this release an opt-in preview until the
+physical demonstration passes; do not relabel it universally compatible.
 
 Bluetooth pairing does not require Wi-Fi on the iPhone. The Windows receiver
 needs HA/MQTT connectivity. The separate HTTPS monitor requires a network route

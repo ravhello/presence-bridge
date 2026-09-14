@@ -17,13 +17,26 @@ SYSTEM anche prima del login. Non tutti gli adattatori sono stati collaudati.
 
 ## 2. Installa l'integrazione gratuita
 
+La versione attuale e la **0.1.36, anteprima pubblica**. Presence Pair e ancora
+su TestFlight, non sull'App Store pubblico: per il primo abbinamento serve
+accedere all'app. L'integrazione si installa da HACS come repository
+personalizzato; non e ancora inclusa nel catalogo predefinito.
+
 1. In HACS apri **Integrazioni**.
 2. Dal menu con i tre puntini scegli **Repository personalizzati**.
 3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
    **Integrazione** e conferma.
-4. Installa **Presence Bridge** e riavvia Home Assistant.
+4. Abilita le pre-release per questo repository, seleziona **v0.1.36**, installa
+   **Presence Bridge** e riavvia Home Assistant. HACS normalmente esclude le beta;
+   vedi la [documentazione dell'interruttore beta](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
+
+In alternativa, estrai `presence_bridge-0.1.36.zip` dalla release nella cartella
+`<config HA>/custom_components/presence_bridge/`. Il file `manifest.json` deve
+trovarsi direttamente in quella cartella, non in una sottocartella aggiuntiva.
+Prima di aggiornare crea un backup di HA, poi riavvia e aggiungi l'integrazione
+come sopra. Usa il pacchetto Windows della stessa versione 0.1.36.
 
 ## 3. Prepara il ricevitore Windows
 
