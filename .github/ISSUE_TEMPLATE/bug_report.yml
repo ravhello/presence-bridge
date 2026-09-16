@@ -20,7 +20,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: App build, iOS, Home Assistant, integration, receiver and Windows versions.
+      description: App build, iOS, Home Assistant, integration, receiver and Windows/Linux/BlueZ versions.
     validations:
       required: true
   - type: input
@@ -42,6 +42,6 @@ body:
     id: reproduction
     attributes:
       label: Steps, expected result and actual result
-      description: Include whether the Windows pairing user was signed in and any PP error code.
+      description: Include local Linux or remote MQTT mode, missing prerequisite/error codes, and whether a Windows pairing user was signed in. No private keys or raw Bluetooth logs.
     validations:
       required: true

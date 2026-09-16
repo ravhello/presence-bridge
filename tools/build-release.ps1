@@ -32,7 +32,15 @@ $windowsFiles = @(
     'adapter_info.py','interactive_pairing_helper.py','numeric_pairing_probe.py',
     'identity_removal.py','gatt_server.py','observer.py','protocol.py',
     'reverse_gatt_client.py','requirements.txt','installer-access.ps1',
-    'install.ps1','uninstall.ps1','config.example.json'
+    'install.ps1','uninstall.ps1','config.example.json','README.md'
 ) | ForEach-Object { Get-Item -LiteralPath (Join-Path $windowsRoot $_) }
 New-ReleaseArchive ('presence-bridge-windows-' + $manifest.version + '.zip') $windowsFiles $windowsRoot
+$linuxFiles = @(
+    'bridge/linux/receiver.py','bridge/linux/requirements.txt','bridge/linux/config.example.json',
+    'bridge/linux/install.sh','bridge/linux/presence-bridge.service','bridge/linux/Dockerfile',
+    'bridge/linux/compose.yaml','custom_components/presence_bridge/protocol.py',
+    'docs/linux.md','docs/setup.md','docs/protocol.md','docs/compatibility.md','LICENSE','README.md'
+) | ForEach-Object { Get-Item -LiteralPath (Join-Path $root $_) }
+$linuxFiles += @(Get-ChildItem -LiteralPath (Join-Path $componentRoot 'receiver') -File -Filter '*.py')
+New-ReleaseArchive ('presence-bridge-linux-' + $manifest.version + '.zip') $linuxFiles $root
 & (Join-Path $PSScriptRoot 'test-release.ps1') -ReleaseDirectory $OutputDirectory

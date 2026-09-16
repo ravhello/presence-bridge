@@ -67,6 +67,11 @@ if ($python) {
     $pythonArguments = @()
 }
 
+& $pythonCommand @pythonArguments -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) and sys.platform == 'win32' else 1)"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Python 3.11 or newer for Windows is required. The existing observer has not been stopped.'
+}
+
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask -and $existingTask.State -eq 'Running') {
     Stop-ScheduledTask -TaskName $TaskName
@@ -118,6 +123,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $venv 'Scripts\python.exe'))) {
 }
 $venvPython = Join-Path $venv 'Scripts\python.exe'
 & $venvPython -m pip install --disable-pip-version-check --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare pip. Check network access and retry the installer.' }
 & $venvPython -m pip install --disable-pip-version-check -r (Join-Path $InstallRoot 'requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Unable to install Presence Bridge dependencies.' }
 $adapter = (& $venvPython (Join-Path $InstallRoot 'adapter_info.py') | ConvertFrom-Json)
@@ -174,3 +180,5 @@ if ($state -ne 'Running') { throw "Presence Bridge task state is $state." }
 Write-Host "Presence Bridge installed at $InstallRoot" -ForegroundColor Green
 Write-Host "Task: $TaskName ($state)" -ForegroundColor Green
 Write-Host 'Add the Presence Bridge integration in Home Assistant, then assign this observer to an area.'
+Write-Host 'The configured Windows user must remain signed in for new pairings (locking the screen is OK).'
+Write-Host 'A Running task does not certify Bluetooth pairing. Verify a fresh signal and complete an iPhone enrollment in HA.'

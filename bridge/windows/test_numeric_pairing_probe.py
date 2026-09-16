@@ -29,6 +29,7 @@ class Level(IntEnum):
 class Status(IntEnum):
     PAIRED = 0
     FAILED = 1
+    ALREADY_PAIRED = 2
 
 
 class NumericPairingTest(unittest.IsolatedAsyncioTestCase):
@@ -163,6 +164,38 @@ class NumericPairingTest(unittest.IsolatedAsyncioTestCase):
         )
         self.custom.pair_with_protection_level_async.assert_not_awaited()
 
+    async def test_concurrent_already_paired_result_requires_fresh_strong_bond(self):
+        for level, paired, success in (
+            (Level.ENCRYPTION_AND_AUTHENTICATION, True, True),
+            (Level.ENCRYPTION, True, False),
+            (Level.ENCRYPTION_AND_AUTHENTICATION, False, False),
+        ):
+            self.verified_level = level
+            self.verified_paired = paired
+            self.custom.pair_with_protection_level_async = AsyncMock(
+                return_value=SimpleNamespace(
+                    status=Status.ALREADY_PAIRED,
+                    protection_level_used=Level.NONE,
+                )
+            )
+            if success:
+                reused = await probe.pair_with_numeric_comparison(
+                    self.client,
+                    AsyncMock(),
+                    time.monotonic() + 3,
+                    allow_authenticated_bond=True,
+                )
+                self.assertTrue(reused)
+            else:
+                with self.assertRaises(PairingDiagnosticError):
+                    await probe.pair_with_numeric_comparison(
+                        self.client,
+                        AsyncMock(),
+                        time.monotonic() + 3,
+                        allow_authenticated_bond=True,
+                    )
+            self.args.accept.assert_not_called()
+
     async def test_stale_none_result_uses_fresh_authenticated_peer(self):
         self.level = Level.NONE
         await probe.pair_with_numeric_comparison(
@@ -270,16 +303,43 @@ class DiagnosticArmTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_product_pairing_needs_no_private_arm_file(self):
         policy = probe.QRSessionPairing(self.root, self.write, Mock())
+        self.assertFalse(policy.allow_link_recovery)
         with patch.object(
             probe, "pair_with_numeric_comparison", new=AsyncMock()
         ) as pair:
             self.assertTrue(await policy(None, self.link, time.monotonic() + 3))
+            self.assertTrue(policy.allow_link_recovery)
             pair.assert_awaited_once()
             self.assertTrue(pair.await_args.kwargs["allow_authenticated_bond"])
             confirm = pair.await_args.args[1]
             self.assertTrue(await confirm("123456", time.monotonic() + 3))
             self.assertFalse(await confirm("123456", time.monotonic() - 1))
         self.assertFalse((self.root / probe.ARM_NAME).exists())
+
+    async def test_recovery_permission_is_not_retained_after_rejection_or_probe(self):
+        policy = probe.QRSessionPairing(self.root, self.write, Mock())
+        policy.allow_link_recovery = True
+        with (
+            patch.object(
+                probe.NumericPairingProbe, "__call__", new=AsyncMock(return_value=False)
+            ),
+            patch.object(
+                probe,
+                "pair_with_numeric_comparison",
+                new=AsyncMock(
+                    side_effect=PairingDiagnosticError("Declined", "rejected")
+                ),
+            ),
+            self.assertRaises(PairingDiagnosticError),
+        ):
+            await policy(None, self.link, time.monotonic() + 3)
+        self.assertFalse(policy.allow_link_recovery)
+        policy.allow_link_recovery = True
+        with patch.object(
+            probe.NumericPairingProbe, "__call__", new=AsyncMock(return_value=True)
+        ):
+            self.assertTrue(await policy(None, self.link, time.monotonic() + 3))
+        self.assertFalse(policy.allow_link_recovery)
 
     async def test_arm_is_consumed_once_without_writing_identity(self):
         self.arm()

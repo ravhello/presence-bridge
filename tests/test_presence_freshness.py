@@ -98,6 +98,23 @@ def test_replayed_observation_does_not_refresh_last_seen():
     assert c.identity_payload("phone")["room_fresh"] is False
 
 
+def test_bluez_resolved_address_is_scoped_to_enrolling_receiver():
+    c, ns, now = make_coordinator()
+    peer = "11:22:33:44:55:66"
+    c.memory["identities"]["phone"].update(identity_address=peer, paired_by="linux_owner")
+    foreign = add_observer(c, ns, now, oid="foreign")
+    foreign.observations[0]["address"] = peer
+    c._resolve_identities()
+    assert not c.identity_states["phone"].is_home
+    owner = add_observer(c, ns, now, oid="linux_owner")
+    owner.observations[0]["address"] = peer
+    c._resolve_identities()
+    assert c.identity_states["phone"].is_home
+    assert c.identity_states["phone"].observer_id == "linux_owner"
+    owner.online = False
+    assert c._matches_for_irk("11" * 16) == []
+
+
 def test_old_future_and_unknown_timestamp_cannot_mark_home():
     for age in (181, -30):
         c, ns, now = make_coordinator()

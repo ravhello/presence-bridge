@@ -1,0 +1,13 @@
+{
+  "name": "Hall Bluetooth",
+  "adapter": "",
+  "bluez_storage": "/var/lib/bluetooth",
+  "state_file": "/var/lib/presence-bridge/peers.json",
+  "mqtt": {
+    "host": "192.0.2.10",
+    "port": 1883,
+    "username": "presence_bridge",
+    "password": "REPLACE_WITH_A_DEDICATED_PASSWORD",
+    "tls": false
+  }
+}

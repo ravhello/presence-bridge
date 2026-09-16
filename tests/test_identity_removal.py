@@ -21,6 +21,7 @@ class CoordinatorRemovalTest(unittest.IsolatedAsyncioTestCase):
         )
         tree = ast.parse(source.read_text(encoding="utf-8"))
         methods = {
+            "_async_publish",
             "async_remove_identity",
             "_async_remove_identity_locked",
             "_identity_removal_result_message",
@@ -84,7 +85,10 @@ class CoordinatorRemovalTest(unittest.IsolatedAsyncioTestCase):
         c._removal_requests = {}
         c._cipher_cache = {self.key: object()}
         c.store = SimpleNamespace(async_save=AsyncMock())
-        c.hass = object()
+        c.hass = SimpleNamespace(
+            config_entries=SimpleNamespace(async_entries=lambda _: [object()])
+        )
+        c.local_receiver = SimpleNamespace(receiver=None)
         c._rebuild_identity_states = Mock()
         c._set_pairing_state = Mock()
         c.pairing_public = {"identity_id": self.identity}

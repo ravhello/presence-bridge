@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from gatt_server import GattPairingServer, GattProximityServer
+from gatt_server import GattAdvertisingError, GattPairingServer, GattProximityServer
 from identity_removal import BondDevice, compact_address, unpair_device
 from numeric_pairing_probe import QRSessionPairing
 from protocol import PairingLink
@@ -27,7 +27,7 @@ from reverse_gatt_client import (
 
 LOGGER = logging.getLogger("presence_bridge.interactive_pairing")
 PREFLIGHT_READY_UUID = "b6201f73-89f1-4c2b-981f-7ccade5a52d4"
-PROXIMITY_PROVIDER_START_ATTEMPTS = 5
+PROXIMITY_PROVIDER_START_ATTEMPTS = 3
 PROXIMITY_PROVIDER_RETRY_SECONDS = 2.0
 
 
@@ -93,15 +93,20 @@ async def _start_proximity_server(
             last_error = error
             await server.async_stop()
             if attempt >= PROXIMITY_PROVIDER_START_ATTEMPTS:
-                raise
+                if isinstance(error, GattAdvertisingError):
+                    raise
+                raise GattAdvertisingError(
+                    "The Windows receiver could not start its Bluetooth signal. "
+                    f"Check the receiver adapter: {type(error).__name__}: {error}"
+                ) from error
             _status(
                 result_path,
                 link.session_id,
                 "progress",
                 detail_code="windows_adapter_recovering",
                 message=(
-                    "Windows is releasing the previous Bluetooth session; "
-                    "retrying automatically"
+                    "The receiver could not start Bluetooth advertising; "
+                    "retrying the local service without changing phone pairings"
                 ),
                 retry_attempt=attempt,
             )

@@ -22,11 +22,19 @@ ATT_ERROR_AUTHORIZATION = 0x08
 ADVERTISEMENT_START_TIMEOUT_SECONDS = 5.0
 ADVERTISEMENT_START_ATTEMPTS = 3
 ADVERTISEMENT_POLL_SECONDS = 0.1
+ADVERTISEMENT_ABORTED_GRACE_SECONDS = 0.5
 ADVERTISEMENT_CREATED = 0
 ADVERTISEMENT_STOPPED = 1
 ADVERTISEMENT_STARTED = 2
 ADVERTISEMENT_ABORTED = 3
 ADVERTISEMENT_STARTED_WITHOUT_ALL_DATA = 4
+
+
+class GattAdvertisingError(RuntimeError):
+    """Receiver startup failed before an iPhone could be detected."""
+
+    detail_code = "windows_advertising_unavailable"
+    terminal_state = "error"
 
 
 def advertisement_status_name(status: Any) -> str:
@@ -235,6 +243,7 @@ class GattPairingServer:
         deadline = (
             asyncio.get_running_loop().time() + ADVERTISEMENT_START_TIMEOUT_SECONDS
         )
+        aborted_since: float | None = None
         while True:
             status = self._provider.advertisement_status
             self._advertisement_status = advertisement_status_name(status)
@@ -244,12 +253,23 @@ class GattPairingServer:
                 ADVERTISEMENT_STARTED_WITHOUT_ALL_DATA,
             }:
                 return
-            if asyncio.get_running_loop().time() >= deadline:
-                raise RuntimeError(
-                    "Windows Bluetooth advertising did not start within "
-                    f"{ADVERTISEMENT_START_TIMEOUT_SECONDS:.0f} seconds "
+            now = asyncio.get_running_loop().time()
+            if code == ADVERTISEMENT_ABORTED:
+                if aborted_since is None:
+                    aborted_since = now
+            else:
+                aborted_since = None
+            # Windows can briefly report Aborted before Started. A sustained
+            # abort is a receiver fault, not an absent or distant iPhone.
+            if now >= deadline or (
+                aborted_since is not None
+                and now - aborted_since >= ADVERTISEMENT_ABORTED_GRACE_SECONDS
+            ):
+                raise GattAdvertisingError(
+                    "The Windows receiver cannot transmit its Bluetooth signal "
                     f"(status: {self._advertisement_status}, "
-                    f"error: {self._advertisement_error})"
+                    f"error: {self._advertisement_error}). "
+                    "Pairing has not started; check the receiver Bluetooth adapter."
                 )
             await asyncio.sleep(ADVERTISEMENT_POLL_SECONDS)
 

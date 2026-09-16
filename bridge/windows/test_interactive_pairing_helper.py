@@ -455,6 +455,30 @@ def test_command_secret_is_removed_before_parsing(tmp_path: Path) -> None:
     assert not command_path.exists()
 
 
+def test_receiver_start_failure_does_not_inherit_phone_wait(tmp_path, monkeypatch):
+    class Reverse:
+        detail_code = "waiting_for_iphone_advertisement"
+
+        def __init__(self, **_kwargs):
+            self.lease_payload = {}
+
+    monkeypatch.setattr(helper, "ReverseGattPairingClient", Reverse)
+    monkeypatch.setattr(
+        helper,
+        "_start_proximity_server",
+        AsyncMock(side_effect=helper.GattAdvertisingError("Receiver not advertising")),
+    )
+    command_path = tmp_path / "command.json"
+    result_path = tmp_path / "result.json"
+    command_path.write_text(json.dumps(command(link())), encoding="utf-8")
+    with pytest.raises(helper.GattAdvertisingError):
+        asyncio.run(helper._run(command_path, result_path))
+    result = json.loads(result_path.read_text())
+    assert result["state"] == "error"
+    assert result["detail_code"] == "windows_advertising_unavailable"
+    assert not result.get("secure_exchange_complete")
+
+
 def test_result_write_retries_transient_windows_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

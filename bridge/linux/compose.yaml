@@ -1,0 +1,18 @@
+services:
+  presence-bridge:
+    build:
+      context: ../..
+      dockerfile: bridge/linux/Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - /run/dbus:/run/dbus:ro
+      - /var/lib/bluetooth:/var/lib/bluetooth:ro
+      - ./config.json:/etc/presence-bridge/config.json:ro
+      - presence-state:/var/lib/presence-bridge
+    tmpfs: [/tmp]
+volumes:
+  presence-state:

@@ -1,6 +1,6 @@
 [project]
 name = "presence-bridge-dev"
-version = "0.1.36"
+version = "0.2.0"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
@@ -17,7 +17,11 @@ ignore = ["E501", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"tests/test_linux_receiver.py" = ["ASYNC110"]
 "bridge/windows/test_*.py" = ["S101"]
 "bridge/windows/gatt_server.py" = ["PLC0415"]
 "bridge/windows/observer.py" = ["PLC0415"]
 "bridge/windows/identity_removal.py" = ["PLC0415"]
+"custom_components/presence_bridge/local_receiver.py" = ["PLC0415"]
+# dbus-fast requires literal D-Bus type signatures, not Python annotations.
+"custom_components/presence_bridge/receiver/bluez.py" = ["F722", "F821", "ASYNC109"]

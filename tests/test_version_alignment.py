@@ -37,3 +37,13 @@ def test_public_versions_match() -> None:
     )
 
     assert project["project"]["version"] == manifest["version"] == _observer_version()
+    receiver = ast.parse(
+        (ROOT / "custom_components/presence_bridge/receiver/__init__.py").read_text()
+    )
+    version = next(
+        node.value.value
+        for node in receiver.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in node.targets)
+    )
+    assert version == manifest["version"]

@@ -1,0 +1,29 @@
+[Unit]
+Description=Presence Bridge Linux Bluetooth receiver (experimental)
+After=bluetooth.service network-online.target
+Wants=bluetooth.service network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/opt/presence-bridge/.venv/bin/python /opt/presence-bridge/bridge/linux/receiver.py --config /etc/presence-bridge/config.json
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=presence-bridge
+ReadWritePaths=/var/lib/presence-bridge
+ReadOnlyPaths=/var/lib/bluetooth
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

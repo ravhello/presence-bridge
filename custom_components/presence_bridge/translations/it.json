@@ -9,9 +9,10 @@
     "step": {
       "user": {
         "data": {
-          "name": "Nome"
+          "name": "Nome",
+          "local_receiver": "Ricevitore Linux locale (sperimentale, senza MQTT)"
         },
-        "description": "Presence Bridge usa l'integrazione MQTT esistente e mantiene locale l'elaborazione delle identita.",
+        "description": "Scegli Linux locale se HA ha accesso a BlueZ, D-Bus, un adattatore BLE central/peripheral e all'archivio abbinamenti in sola lettura. Altrimenti disabilita questa opzione e configura MQTT per un ricevitore Windows/Linux separato. Serve Presence Pair su iOS 17+. I proxy passivi non effettuano abbinamenti. La plancia mostra i requisiti mancanti. [Guida](https://github.com/ravhello/presence-bridge/blob/main/docs/setup.md)",
         "title": "Configura Presence Bridge"
       }
     }
@@ -20,10 +21,13 @@
     "step": {
       "init": {
         "title": "Tempi di presenza",
-        "description": "Regola le scadenze per le trasmissioni intermittenti degli iPhone e lo stato dei ricevitori.",
+        "description": "Configura timeout e ricevitore Linux opzionale. Le modifiche ricaricano questa integrazione e interrompono eventuali abbinamenti in corso.",
         "data": {
           "away_timeout": "Timeout telefono fuori casa (secondi)",
-          "observer_timeout": "Timeout ricevitore offline (secondi)"
+          "observer_timeout": "Timeout ricevitore offline (secondi)",
+          "local_receiver": "Ricevitore Linux locale (sperimentale, senza MQTT)",
+          "local_adapter": "MAC adattatore Linux (vuoto: rileva se unico)",
+          "bluez_storage": "Percorso archivio BlueZ in sola lettura"
         }
       }
     }

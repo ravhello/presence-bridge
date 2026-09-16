@@ -13,7 +13,7 @@ or export identity keys.
 | Windows passive tracking | MQTT Windows observer | Live deployment verified; coverage depends on antenna and phone advertisements |
 | Native HA Bluetooth tracking | Shared HA Bluetooth cache, including non-connectable scanners and supported proxies | Native API and timestamp behavior covered by local tests; per-installation runtime verification required |
 | HA host | HA OS, Container or other supported HA installation with MQTT | HA 2026.8.3 used for deployment; not every older HA release has been tested |
-| Linux/BlueZ initial pairing | Not implemented | Do not advertise this as supported |
+| Linux/BlueZ initial pairing | Experimental in-process or remote receiver, BlueZ key storage read-only | Behavioral tests only; physical Linux/iPhone and ARM certification pending |
 | ESPHome/Shelly/Sonoff initial pairing | Not implemented by Presence Bridge | Passive HA-compatible radio support does not imply enrollment support |
 | Android/Apple Watch enrollment via app | Not implemented by the iPhone app | Do not describe as universally compatible |
 
@@ -50,9 +50,19 @@ bonds, cancellation, timeout, user decline, HA/MQTT restarts, removal and a
 second phone. Confirm protected GATT ACK, HA persistence and phone receipt for
 each successful enrollment. No test may unpair unrelated devices.
 
-The saved-bond recovery is bounded to one repair per peer per attempt and
-requires verified QR possession plus an explicit protected-write rejection.
-It never treats a radio timeout as proof of a corrupt bond.
+The current development recovery is bounded to one repair per attempt, even
+if the peer's address rotates. It requires the current verified QR claim and
+an old bond: weak protection, protected-write rejection or bounded persistent
+post-verification connection failures can trigger recovery. Pre-claim radio
+timeouts never authorize unpairing. See the [state matrix](partial-pairing-compatibility.md).
+These recovery changes are included in the 0.2.0 preview; older 0.1.36 archives do not contain them.
+
+The [installation matrix](setup.md) distinguishes HA hosting from enrollment.
+The integration does not install a Windows receiver or manage the host's radio
+driver. MQTT is required for remote receivers, but not for local Linux enrollment.
+The local mode requires system D-Bus and readable BlueZ bond storage; HA OS
+does not automatically expose that storage to Core. Linux is headless and does
+not require a logged-in graphical user. See [Linux setup](linux.md).
 
 Exercise screen lock/app background, away/return and at least two independent
 receivers before using room estimates for consequential automations. Keep the

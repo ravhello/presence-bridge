@@ -31,31 +31,38 @@ class PresenceBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
 
         errors: dict[str, str] = {}
-        if not self.hass.config_entries.async_entries("mqtt"):
+        if (
+            user_input is not None
+            and not user_input.get("local_receiver", True)
+            and not self.hass.config_entries.async_entries("mqtt")
+        ):
             errors["base"] = "mqtt_not_configured"
         elif user_input is not None:
             return self.async_create_entry(
                 title=str(user_input.get(CONF_NAME) or PANEL_TITLE),
                 data={},
+                options={"local_receiver": user_input.get("local_receiver", True)},
             )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Optional(CONF_NAME, default=PANEL_TITLE): str}),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_NAME, default=PANEL_TITLE): str,
+                    vol.Optional("local_receiver", default=True): bool,
+                }
+            ),
             errors=errors,
         )
 
     @staticmethod
     def async_get_options_flow(config_entry) -> PresenceBridgeOptionsFlow:
         """Return the options flow."""
-        return PresenceBridgeOptionsFlow(config_entry)
+        return PresenceBridgeOptionsFlow()
 
 
 class PresenceBridgeOptionsFlow(config_entries.OptionsFlow):
     """Configure presence expiry without restarting the bridge."""
-
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -66,6 +73,20 @@ class PresenceBridgeOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        "local_receiver",
+                        default=self.config_entry.options.get("local_receiver", False),
+                    ): bool,
+                    vol.Optional(
+                        "local_adapter",
+                        default=self.config_entry.options.get("local_adapter", ""),
+                    ): str,
+                    vol.Optional(
+                        "bluez_storage",
+                        default=self.config_entry.options.get(
+                            "bluez_storage", "/var/lib/bluetooth"
+                        ),
+                    ): str,
                     vol.Optional(
                         CONF_AWAY_TIMEOUT,
                         default=self.config_entry.options.get(
