@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation and supported configurations
+    url: https://github.com/ravhello/presence-bridge/blob/main/docs/setup.md
+    about: Choose local Linux or a remote Windows/Linux receiver.
+  - name: Community questions and new receiver ports
+    url: https://github.com/ravhello/presence-bridge/discussions
+    about: Discuss platform support and improvements without posting secrets.
+  - name: Report a security vulnerability privately
+    url: https://github.com/ravhello/presence-bridge/security/advisories/new
+    about: Do not open a public issue containing private identity material.

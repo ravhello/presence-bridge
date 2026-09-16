@@ -395,6 +395,10 @@ class BlueZ:
                     "Pair",
                     timeout=max(1, min(90, deadline - time.monotonic())),
                 )
+        except BaseException:
+            with suppress(ReceiverError, TimeoutError):
+                await self.call(path, DEVICE, "CancelPairing", timeout=5)
+            raise
         finally:
             self.agent.target = None
 

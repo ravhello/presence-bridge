@@ -101,7 +101,9 @@ def test_replayed_observation_does_not_refresh_last_seen():
 def test_bluez_resolved_address_is_scoped_to_enrolling_receiver():
     c, ns, now = make_coordinator()
     peer = "11:22:33:44:55:66"
-    c.memory["identities"]["phone"].update(identity_address=peer, paired_by="linux_owner")
+    c.memory["identities"]["phone"].update(
+        identity_address=peer, paired_by="linux_owner"
+    )
     foreign = add_observer(c, ns, now, oid="foreign")
     foreign.observations[0]["address"] = peer
     c._resolve_identities()
