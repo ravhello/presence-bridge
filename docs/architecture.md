@@ -1,3 +1,8 @@
+---
+title: Architecture And Extension Contract
+permalink: /architecture/
+---
+
 # Architecture And Extension Contract
 
 ## Components

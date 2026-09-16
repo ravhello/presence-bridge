@@ -1,6 +1,8 @@
 title: Presence Bridge
 description: Local, privacy-preserving iPhone room presence for Home Assistant
 theme: jekyll-theme-minimal
+plugins:
+  - jekyll-relative-links
 url: https://ravhello.github.io
 baseurl: /presence-bridge
 github:

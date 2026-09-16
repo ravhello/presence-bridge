@@ -1,3 +1,8 @@
+---
+title: Choose Your Installation
+permalink: /setup/
+---
+
 # Choose Your Installation
 
 ## Local Linux: Fewest Components, Experimental

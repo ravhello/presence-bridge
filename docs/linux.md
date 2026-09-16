@@ -1,3 +1,8 @@
+---
+title: Linux Receiver (Experimental)
+permalink: /linux/
+---
+
 # Linux Receiver (Experimental)
 
 This release includes working BlueZ transport and enrollment code, tests with

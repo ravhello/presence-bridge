@@ -1,3 +1,8 @@
+---
+title: Compatibility and release verification
+permalink: /compatibility/
+---
+
 # Compatibility and release verification
 
 ## Two different capabilities

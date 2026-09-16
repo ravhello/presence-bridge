@@ -1,3 +1,8 @@
+---
+title: 0.2.0 Public Preview
+permalink: /release-0.2.0/
+---
+
 # 0.2.0 Public Preview
 
 This release keeps the integration and receivers free and MIT licensed.
@@ -20,6 +25,17 @@ Presence Pair remains a separate proprietary iOS app, free during testing.
 - Public release packaging checks and receiver installation documentation.
 
 ## Upgrade
+
+## Automated Verification
+
+Before publication, the public CI passed Windows validation, Linux Python
+3.11/3.13 tests, Docker image construction, HACS and Home Assistant hassfest.
+Linux CI executed 64 tests including POSIX BlueZ storage checks and imported
+the real D-Bus runtime. These are software/deployment checks, not RF or iPhone
+hardware certification. Private diagnostic scripts and iOS source are excluded
+from the public packages.
+
+## Installation And Upgrade
 
 Back up HA and receiver state. Install matching integration and receiver
 packages; restart HA once after changing Python code. Existing MQTT/Windows

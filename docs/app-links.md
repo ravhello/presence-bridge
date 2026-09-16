@@ -1,3 +1,8 @@
+---
+title: Open Presence Pair from the same iPhone
+permalink: /app-links/
+---
+
 # Open Presence Pair from the same iPhone
 
 The pairing and live-signal panels pass the existing `presencepair://` invitation

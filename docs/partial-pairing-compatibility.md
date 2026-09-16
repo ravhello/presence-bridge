@@ -1,3 +1,8 @@
+---
+title: Saved and partial Bluetooth pairing
+permalink: /partial-pairing-compatibility/
+---
+
 # Saved and partial Bluetooth pairing
 
 Normal enrollment must preserve valid saved bonds. A fresh reset is a diagnostic
