@@ -53,6 +53,9 @@ class PresenceBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+            description_placeholders={
+                "guide_url": "https://github.com/ravhello/presence-bridge/blob/main/docs/setup.md"
+            },
         )
 
     @staticmethod

@@ -12,7 +12,7 @@
           "name": "Name",
           "local_receiver": "Local Linux receiver (experimental, no MQTT)"
         },
-        "description": "Choose local Linux if HA can access BlueZ, D-Bus, a BLE central/peripheral adapter and read-only bond storage. Otherwise disable this option and configure MQTT for a separate Windows/Linux receiver. Presence Pair on iOS 17+ is required. Passive proxies cannot enroll phones. The panel reports missing local capabilities. [Guide](https://github.com/ravhello/presence-bridge/blob/main/docs/setup.md)",
+        "description": "Choose local Linux if HA can access BlueZ, D-Bus, a BLE central/peripheral adapter and read-only bond storage. Otherwise disable this option and configure MQTT for a separate Windows/Linux receiver. Presence Pair on iOS 17+ is required. Passive proxies cannot enroll phones. The panel reports missing local capabilities. [Guide]({guide_url})",
         "title": "Set up Presence Bridge"
       }
     }

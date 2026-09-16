@@ -12,7 +12,7 @@
           "name": "Nome",
           "local_receiver": "Ricevitore Linux locale (sperimentale, senza MQTT)"
         },
-        "description": "Scegli Linux locale se HA ha accesso a BlueZ, D-Bus, un adattatore BLE central/peripheral e all'archivio abbinamenti in sola lettura. Altrimenti disabilita questa opzione e configura MQTT per un ricevitore Windows/Linux separato. Serve Presence Pair su iOS 17+. I proxy passivi non effettuano abbinamenti. La plancia mostra i requisiti mancanti. [Guida](https://github.com/ravhello/presence-bridge/blob/main/docs/setup.md)",
+        "description": "Scegli Linux locale se HA ha accesso a BlueZ, D-Bus, un adattatore BLE central/peripheral e all'archivio abbinamenti in sola lettura. Altrimenti disabilita questa opzione e configura MQTT per un ricevitore Windows/Linux separato. Serve Presence Pair su iOS 17+. I proxy passivi non effettuano abbinamenti. La plancia mostra i requisiti mancanti. [Guida]({guide_url})",
         "title": "Configura Presence Bridge"
       }
     }

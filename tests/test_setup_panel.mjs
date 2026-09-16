@@ -55,6 +55,14 @@ test("loading is distinct from missing hardware", () => {
   assert.equal(panel().setupState(data()), "receiver_missing");
 });
 
+test("local Linux prerequisite failures are visible and escaped", () => {
+  const p = panel();
+  const info = { ...data(), local_receiver: { enabled: true, ready: false, message: "BlueZ <storage> missing" } };
+  assert.match(p.setupView(info), /BlueZ &lt;storage&gt; missing/);
+  assert.match(p.setupView(info), /No MQTT required/);
+  assert.equal(p.setupState(info), "receiver_missing");
+});
+
 test("native HA proxy alone never enables initial enrollment", () => {
   const p = panel();
   p._data = data([proxy]);

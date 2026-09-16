@@ -63,6 +63,11 @@ class LocalReceiver:
     def emit(self, suffix, payload):
         if not self.receiver:
             return
+        if suffix == "status" and payload.get("online") is False:
+            self.status.update(
+                ready=False,
+                message="Local Bluetooth unavailable; fix the host connection, then reload Presence Bridge",
+            )
         payload = {**payload, "observer_id": self.receiver.observer_id}
         message = SimpleNamespace(
             topic=f"{TOPIC_ROOT}/{self.receiver.observer_id}/{suffix}",
