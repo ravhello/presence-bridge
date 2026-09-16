@@ -7,6 +7,11 @@ permalink: /tutorial/
 
 ## 1. Check the requirements
 
+This tutorial covers **Windows + MQTT**. Version 0.2.0 also offers experimental
+headless Linux enrollment, remote or inside HA without MQTT when BlueZ, D-Bus
+and read-only bond storage are available. See [installation choices](setup.md)
+and [Linux setup](linux.md). Passive proxies do not replace enrollment receivers.
+
 You need Home Assistant 2025.1 or newer, an MQTT broker already connected to
 Home Assistant, an always-on Windows 10/11 computer with Bluetooth LE, and an
 iPhone running iOS 17 or newer. Keep each observer computer in a fixed place.
@@ -14,10 +19,14 @@ The adapter must support both BLE central connections and peripheral
 advertising. During enrollment the configured Windows user must be signed in;
 a locked session is sufficient. Passive observation runs as SYSTEM before
 login. Use a Windows version receiving security updates.
+A login screen after reboot does not count as a signed-in session. Do not
+enable automatic login to work around this requirement. If Windows hosts the
+HA VM, leave the receiver's radio with Windows; MQTT removes the need for
+Bluetooth USB passthrough into HA.
 
 ## 2. Install the free integration
 
-The current release is the **0.1.36 public preview**. Presence Pair is still in
+The current release is the **0.2.0 public preview**. Presence Pair is still in
 TestFlight, not yet on the public App Store. You need access to that app for
 initial enrollment. This repository can be installed through HACS as a custom
 repository; it is not a default catalog listing.
@@ -26,16 +35,16 @@ repository; it is not a default catalog listing.
 2. From the three-dot menu, select **Custom repositories**.
 3. Enter `https://github.com/ravhello/presence-bridge`, choose
    **Integration**, and confirm.
-4. Enable pre-releases for this repository, select **v0.1.36**, install
+4. Enable pre-releases for this repository, select **v0.2.0**, install
    **Presence Bridge**, and restart Home Assistant. HACS normally excludes betas;
    see its [pre-release switch documentation](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 
-Alternatively, extract the release's `presence_bridge-0.1.36.zip` into
+Alternatively, extract the release's `presence_bridge-0.2.0.zip` into
 `<HA config>/custom_components/presence_bridge/`. Its `manifest.json` must sit
 directly in that folder. Back up HA before updating; then restart and add the
-integration as above. Use the matching 0.1.36 Windows receiver package.
+integration as above. Use the matching 0.2.0 Windows receiver package.
 
 ## 3. Prepare the Windows observer
 
@@ -133,3 +142,5 @@ Administrator to remove it.
 
 For important automations, combine Bluetooth with motion, doors, Wi-Fi, and
 other signals. Bluetooth alone cannot guarantee an exact room position.
+For this Windows route, disable **Local Linux receiver** when adding the
+integration; MQTT remains required.

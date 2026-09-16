@@ -44,7 +44,7 @@ from reverse_gatt_client import (
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.1.36"
+BRIDGE_VERSION = "0.2.0"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -549,7 +549,7 @@ class MqttPublisher:
         device = {
             "identifiers": [f"ble_presence_observer_{observer_id}"],
             "name": self.config.name,
-            "manufacturer": "Dell / Home Assistant local",
+            "manufacturer": "Presence Bridge",
             "model": "Bluetooth observer",
         }
         common = {

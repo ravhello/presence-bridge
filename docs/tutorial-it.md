@@ -7,6 +7,12 @@ permalink: /tutorial-it/
 
 ## 1. Verifica i requisiti
 
+Questo tutorial descrive il percorso **Windows + MQTT**. Dalla versione 0.2.0
+esiste anche Linux headless (sperimentale), remoto oppure integrato in HA senza
+MQTT se sono accessibili BlueZ, D-Bus e archivio abbinamenti in sola lettura.
+Consulta [scelta installazione](setup.md) e [Linux](linux.md). I proxy passivi
+non sostituiscono un ricevitore per il primo abbinamento.
+
 Servono Home Assistant 2025.1 o successivo, un broker MQTT già collegato a HA,
 un PC Windows 10/11 sempre acceso con Bluetooth LE e un iPhone con iOS 17 o
 successivo. Il PC deve rimanere in una posizione fissa.
@@ -14,10 +20,14 @@ L'adattatore deve supportare sia connessioni BLE centrali sia advertising
 periferico. Durante l'abbinamento l'utente Windows configurato deve avere una
 sessione aperta, anche bloccata; la scansione successiva funziona come servizio
 SYSTEM anche prima del login. Non tutti gli adattatori sono stati collaudati.
+Attenzione: dopo un riavvio, la schermata di login non e una sessione aperta.
+Non abilitare il login automatico per aggirare questo requisito. Se HA e una
+VM sullo stesso PC, lascia l'adattatore del ricevitore a Windows: il collegamento
+con HA avviene via MQTT e non richiede il passthrough USB.
 
 ## 2. Installa l'integrazione gratuita
 
-La versione attuale e la **0.1.36, anteprima pubblica**. Presence Pair e ancora
+La versione attuale e la **0.2.0, anteprima pubblica**. Presence Pair e ancora
 su TestFlight, non sull'App Store pubblico: per il primo abbinamento serve
 accedere all'app. L'integrazione si installa da HACS come repository
 personalizzato; non e ancora inclusa nel catalogo predefinito.
@@ -26,17 +36,17 @@ personalizzato; non e ancora inclusa nel catalogo predefinito.
 2. Dal menu con i tre puntini scegli **Repository personalizzati**.
 3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
    **Integrazione** e conferma.
-4. Abilita le pre-release per questo repository, seleziona **v0.1.36**, installa
+4. Abilita le pre-release per questo repository, seleziona **v0.2.0**, installa
    **Presence Bridge** e riavvia Home Assistant. HACS normalmente esclude le beta;
    vedi la [documentazione dell'interruttore beta](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
 
-In alternativa, estrai `presence_bridge-0.1.36.zip` dalla release nella cartella
+In alternativa, estrai `presence_bridge-0.2.0.zip` dalla release nella cartella
 `<config HA>/custom_components/presence_bridge/`. Il file `manifest.json` deve
 trovarsi direttamente in quella cartella, non in una sottocartella aggiuntiva.
 Prima di aggiornare crea un backup di HA, poi riavvia e aggiungi l'integrazione
-come sopra. Usa il pacchetto Windows della stessa versione 0.1.36.
+come sopra. Usa il pacchetto Windows della stessa versione 0.2.0.
 
 ## 3. Prepara il ricevitore Windows
 
@@ -126,3 +136,5 @@ Puoi escludere la diagnostica e scegliere **Prepara email** oppure **Condividi
 segnalazione**. Il destinatario dell'assistenza e `rikyravi@gmail.com`.
 L'invio non e automatico: controlla il mittente nella tua app email e conferma
 solo il messaggio che vuoi inviare. Non allegare QR, password o backup di HA.
+Per questo percorso Windows disabilita **Ricevitore Linux locale** durante la
+configurazione dell'integrazione; MQTT resta necessario.

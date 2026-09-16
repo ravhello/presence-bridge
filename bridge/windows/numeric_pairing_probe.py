@@ -139,7 +139,12 @@ async def pair_with_numeric_comparison(
             reported_level = result.protection_level_used
             verified_level = None
             verified_paired = False
-            if result.status == DevicePairingResultStatus.PAIRED and confirmed:
+            already_paired = result.status == getattr(
+                DevicePairingResultStatus, "ALREADY_PAIRED", None
+            )
+            if (result.status == DevicePairingResultStatus.PAIRED and confirmed) or (
+                allow_authenticated_bond and already_paired
+            ):
                 refreshed = await DeviceInformation.create_from_id_async(
                     requester.device_information.id
                 )
@@ -155,11 +160,13 @@ async def pair_with_numeric_comparison(
                 confirmed,
             )
             if not (
-                result.status == DevicePairingResultStatus.PAIRED
+                (
+                    (result.status == DevicePairingResultStatus.PAIRED and confirmed)
+                    or (allow_authenticated_bond and already_paired)
+                )
                 and verified_paired
                 and verified_level
                 == DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION
-                and confirmed
             ):
                 raise _fail(
                     "Windows numeric comparison did not establish authenticated "
@@ -169,7 +176,7 @@ async def pair_with_numeric_comparison(
                     f"paired={verified_paired}, confirmed={confirmed})",
                     "numeric_pairing_not_authenticated",
                 )
-            return False
+            return already_paired
     except PairingDiagnosticError:
         raise
     except asyncio.CancelledError:
@@ -196,11 +203,16 @@ class QRSessionPairing:
         self.diagnostic = NumericPairingProbe(directory, write_json, progress)
         self.progress = progress
         self.reused_bond = False
+        self.allow_link_recovery = False
+        self.allow_bond_repair = False
 
     async def __call__(self, client: Any, link: PairingLink, deadline: float) -> bool:
         self.reused_bond = False
+        self.allow_link_recovery = False
+        self.allow_bond_repair = False
         if await self.diagnostic(client, link, deadline):
             return True
+        self.allow_bond_repair = True
         self.progress(
             "numeric_comparison_starting",
             "QR verified; preparing authenticated Bluetooth pairing",
@@ -216,6 +228,7 @@ class QRSessionPairing:
         self.reused_bond = await pair_with_numeric_comparison(
             client, confirm, deadline, allow_authenticated_bond=True
         )
+        self.allow_link_recovery = True
         self.progress(
             "numeric_comparison_verified",
             "Bluetooth security verified; confirming the protected app exchange",

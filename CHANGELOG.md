@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.2.0 - Public compatibility preview
+
+- Add experimental Linux BlueZ receiver, headless systemd and Docker packaging.
+- Add opt-in in-process Linux enrollment; MQTT remains required only for remote receivers.
+- Diagnose local adapter, D-Bus and read-only BlueZ bond storage prerequisites.
+- Verify authenticated selected-peer keys and protected GATT acknowledgement; scoped removal.
+- Preserve observation timestamps and scope BlueZ resolved identity addresses to their enrolling receiver.
+- Include Windows partial-bond/ack recovery and public-panel/app-link fixes from post-0.1.36 testing.
+- Expand installation, privacy, protocol, contribution and hardware-report documentation and Linux CI.
+- Linux remains experimental; no universal hardware or App Store approval claim.
+
+## Unreleased
+
+- Fix the public HA panel loading: the registered classic `js_url` now bootstraps
+  the ES module instead of failing on a static import. Verify the classic entry
+  point and include its full dependency chain in release-archive checks.
+- Make the separate Windows enrollment receiver and MQTT requirements explicit
+  in HA setup, English/Italian tutorials and the HA OS/VM/Container install map.
+  The public panel distinguishes missing/offline enrollment receivers from
+  passive-only HA scanners and keeps requirement details open during polling.
+  Add onboarding regression tests and require the native app-launch helper in
+  the release archive; do not imply that MQTT online certifies the radio.
+- Reuse valid saved phone bonds, handle WinRT ALREADY_PAIRED races, and recover
+  weak or broken QR-verified old bonds once without resetting the receiver.
+  Windows recovery removes only the verified phone's BLE/classic container.
+  Newly created bonds are not repeatedly reset; all retries retain the original
+  deadline. Include a preserved-state pairing compatibility test matrix.
+- Open pairing and live-signal invitations directly on iPhone/iPad, without
+  scanning the same device's screen. Desktop shows an App Store download link.
+  Use Companion's external-window URL handoff, preserving HA's webview. Remove
+  same-window navigation and timed Store redirects for already-installed apps.
+- Recover a closed GATT confirmation channel after verified authenticated QR
+  pairing, with fresh service/claim checks and at most three protected-write
+  attempts inside the original five-minute window. Preserve the saved bond;
+  do not retry explicit ATT rejection, cancellation or diagnostic-only probes.
+- Distinguish a receiver advertising startup failure from waiting for an iPhone.
+  Preserve a specific error through the helper and show receiver-side guidance.
+- Allow brief Windows startup transitions, but stop retrying a persistently
+  aborted advertiser quickly. Reduce provider recreation to three attempts.
+- These diagnostics do not repair an adapter that Windows cannot enumerate.
+
 ## 0.1.36 - public preview (2026-09-14)
 
 - Live per-receiver RSSI with real packet timestamps and 45-second freshness.

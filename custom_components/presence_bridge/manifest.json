@@ -1,15 +1,15 @@
 {
   "domain": "presence_bridge",
   "name": "Presence Bridge",
-  "after_dependencies": ["bluetooth", "person"],
+  "after_dependencies": ["mqtt", "person"],
   "codeowners": ["@ravhello"],
   "config_flow": true,
-  "dependencies": ["http", "mqtt"],
+  "dependencies": ["bluetooth", "http"],
   "documentation": "https://github.com/ravhello/presence-bridge",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/ravhello/presence-bridge/issues",
   "requirements": ["segno==1.6.6"],
   "single_config_entry": true,
-  "version": "0.1.36"
+  "version": "0.2.0"
 }

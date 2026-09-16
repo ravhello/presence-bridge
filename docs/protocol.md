@@ -9,7 +9,7 @@ permalink: /protocol/
 
 The protocol lets an authenticated Home Assistant administrator associate a
 person with the Bluetooth identity created when that person's iPhone bonds to a
-specific Windows observer. It deliberately does not give the app a Home
+specific Windows or Linux receiver. It deliberately does not give the app a Home
 Assistant access token, MQTT credentials, or an IRK.
 
 ## Transport
@@ -49,8 +49,8 @@ Presence Pair advertisement cannot consume or extend another invitation.
 After a matching live address is verified and its identity persisted, HA sends
 the receiver a non-retained MQTT `complete` command for the same active session.
 Only then does the receiver advertise a completion receipt for at most 20 seconds,
-within the remaining attempt budget. This also confirms reused Windows bonds
-whose GATT acknowledgement failed. The UUID is HMAC-SHA256(secret, UTF-8 of
+within the remaining attempt budget. A failed protected GATT acknowledgement
+must never produce a completion receipt, including reused bonds. The UUID is HMAC-SHA256(secret, UTF-8 of
 `presence-bridge-complete:v2\nsid\noid\nexp`), truncated to 16 bytes with the same
 UUID version/variant bits as the other services. The app scans only that UUID and
 accepts it only within its active attempt. It contains no identity or key.
@@ -77,11 +77,19 @@ After verification, the observer writes an encrypted acknowledgement carrying:
 HMAC-SHA256(secret, "presence-bridge-result:v2\n<sid>\n<oid>\n<exp>\naccepted")
 ```
 
-The app shows success after validating that acknowledgement. If WinRT closes
-the temporary GATT channel immediately after a successful bond, the
-acknowledgement becomes best effort: the Windows observer still captures the
-new IRK and Home Assistant remains the authoritative completion state. It does
-not start a second pairing prompt.
+The acknowledgement is mandatory and means the secure exchange succeeded, not
+that HA has saved the association. The app must wait for the QR-authenticated
+HA completion receipt. A lost GATT channel may be retried within the original
+deadline, but cannot downgrade the protected acknowledgement to best effort.
+
+Linux uses the same contract locally in-process or over MQTT. It reads only the
+verified peer's BlueZ bond file, requires an authenticated 128-bit LongTermKey,
+then performs the protected result write. Because BlueZ can resolve RPAs in the
+kernel, its encrypted result may also contain `identity_address` and
+`secure_exchange_complete: true`. HA accepts fresh observations of that address
+only from the enrolling observer. It never accepts another observer's arbitrary
+MAC as equivalent to resolving the IRK. Raw identity addresses stay out of UI
+payloads and diagnostics.
 
 The cross-language test vectors are:
 

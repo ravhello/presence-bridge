@@ -58,6 +58,7 @@ from .const import (
     TOPIC_ROOT,
     TOPIC_STATUS,
 )
+from .local_receiver import LocalReceiver
 from .models import IdentityState, ObserverState
 from .native_bluetooth import refresh_native_observations
 from .protocol import PairingLink, b64url_encode
@@ -164,6 +165,7 @@ class PresenceBridgeCoordinator:
         self._cipher_cache: dict[str, Any] = {}
         self._orphan_pairing_cancels: set[tuple[str, str]] = set()
         self._removal_requests: dict[str, dict[str, Any]] = {}
+        self.local_receiver = LocalReceiver(self)
 
     @property
     def away_timeout(self) -> int:
@@ -205,10 +207,13 @@ class PresenceBridgeCoordinator:
             (TOPIC_PAIRING_RESULT, self._pairing_result_message),
             (TOPIC_IDENTITY_REMOVAL_RESULT, self._identity_removal_result_message),
         )
-        for topic, handler in subscriptions:
-            self._unsubscribers.append(
-                await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
-            )
+        if self.hass.config_entries.async_entries("mqtt"):
+            for topic, handler in subscriptions:
+                self._unsubscribers.append(
+                    await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
+                )
+        if self.entry.options.get("local_receiver", False):
+            await self.local_receiver.start()
         self._periodic_task = self.hass.async_create_background_task(
             self._async_periodic_refresh(),
             f"{DOMAIN}_periodic_refresh",
@@ -219,6 +224,7 @@ class PresenceBridgeCoordinator:
         for request in self._removal_requests.values():
             request["future"].cancel()
         await self.async_cancel_pairing(publish=True)
+        await self.local_receiver.close()
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
@@ -227,6 +233,18 @@ class PresenceBridgeCoordinator:
             with suppress(asyncio.CancelledError):
                 await self._periodic_task
             self._periodic_task = None
+
+    async def _async_publish(self, hass, topic, payload, *, qos=1, retain=False):
+        """Use the same protocol in-process, or deliver to a remote receiver."""
+        receiver = self.local_receiver.receiver
+        if receiver and topic == f"{TOPIC_ROOT}/{receiver.observer_id}/pairing/command":
+            await receiver.command(json.loads(payload), retained=retain)
+            return
+        if not self.hass.config_entries.async_entries("mqtt"):
+            raise HomeAssistantError(
+                "Configure MQTT for a remote receiver, or enable local Linux enrollment"
+            )
+        await mqtt.async_publish(hass, topic, payload, qos=qos, retain=retain)
 
     async def _async_periodic_refresh(self) -> None:
         while True:
@@ -423,7 +441,17 @@ class PresenceBridgeCoordinator:
             state.signal_seen_at = _seen
             state.last_seen = max(match[2] for match in matches)
 
-    def _matches_for_irk(self, irk: str) -> list[tuple[ObserverState, int, datetime]]:
+    def _matches_for_irk(
+        self, irk: str, *, identity_address=None, paired_by=None
+    ) -> list[tuple[ObserverState, int, datetime]]:
+        if not identity_address:
+            for row in self.memory.get("identities", {}).values():
+                if isinstance(row, dict) and row.get("irk") == irk:
+                    identity_address, paired_by = (
+                        row.get("identity_address"),
+                        row.get("paired_by"),
+                    )
+                    break
         try:
             cipher = self._cipher_cache.get(irk)
             if cipher is None:
@@ -447,7 +475,17 @@ class PresenceBridgeCoordinator:
                 ):
                     continue
                 try:
-                    matched = resolve_private_address(cipher, observation["address"])
+                    # BlueZ may resolve RPAs in the kernel. Accept its identity
+                    # address only on the receiver that verified this bond.
+                    matched = bool(
+                        identity_address
+                        and observer.observer_id == paired_by
+                        and observation["address"] == identity_address
+                    )
+                    if not matched:
+                        matched = resolve_private_address(
+                            cipher, observation["address"]
+                        )
                 except (TypeError, ValueError):
                     continue
                 if matched:
@@ -561,7 +599,7 @@ class PresenceBridgeCoordinator:
             pairing_uri=pairing_uri,
             qr_data_uri=qr_data_uri,
         )
-        await mqtt.async_publish(
+        await self._async_publish(
             self.hass,
             f"{TOPIC_ROOT}/{selected.observer_id}/pairing/command",
             json.dumps(
@@ -631,7 +669,7 @@ class PresenceBridgeCoordinator:
         """Cancel the current pairing session and stop Bluetooth enrollment."""
         session = self._pairing_session
         if session and publish:
-            await mqtt.async_publish(
+            await self._async_publish(
                 self.hass,
                 f"{TOPIC_ROOT}/{session['observer_id']}/pairing/command",
                 json.dumps(
@@ -794,7 +832,7 @@ class PresenceBridgeCoordinator:
         session_id: str,
     ) -> None:
         """Stop a receiver session whose HA private key was lost on restart."""
-        await mqtt.async_publish(
+        await self._async_publish(
             self.hass,
             f"{TOPIC_ROOT}/{observer_id}/pairing/command",
             json.dumps(
@@ -851,6 +889,13 @@ class PresenceBridgeCoordinator:
             irk = str(result.get("irk") or "").upper()
             if not _IRK_RE.fullmatch(irk) or not result.get("claim_verified"):
                 raise ValueError("Invalid or unverified identity")
+            identity_address = result.get("identity_address")
+            if identity_address is not None and (
+                not isinstance(identity_address, str)
+                or not re.fullmatch(r"[0-9A-F]{2}(?::[0-9A-F]{2}){5}", identity_address)
+                or result.get("secure_exchange_complete") is not True
+            ):
+                raise ValueError("Unverified resolved identity")
         except Exception as err:
             self._set_pairing_state(
                 "error",
@@ -873,7 +918,9 @@ class PresenceBridgeCoordinator:
             )
             if time.time() >= deadline:
                 break
-            matches = self._matches_for_irk(irk)
+            matches = self._matches_for_irk(
+                irk, identity_address=identity_address, paired_by=session["observer_id"]
+            )
             if matches:
                 break
             await asyncio.sleep(3)
@@ -909,6 +956,7 @@ class PresenceBridgeCoordinator:
             "created_at": dt_util.now().isoformat(),
             "paired_by": session["observer_id"],
             "protocol": 2,
+            "identity_address": identity_address,
         }
         await self.store.async_save(self.memory)
         if self._pairing_session is not session:
@@ -916,7 +964,7 @@ class PresenceBridgeCoordinator:
         self._cipher_cache.pop(irk, None)
         self._rebuild_identity_states()
         self._resolve_identities()
-        await mqtt.async_publish(
+        await self._async_publish(
             self.hass,
             f"{TOPIC_ROOT}/{session['observer_id']}/pairing/command",
             json.dumps(
@@ -1031,7 +1079,7 @@ class PresenceBridgeCoordinator:
             "future": future,
         }
         try:
-            await mqtt.async_publish(
+            await self._async_publish(
                 self.hass,
                 f"{TOPIC_ROOT}/{observer_id}/pairing/command",
                 json.dumps(
@@ -1160,6 +1208,7 @@ class PresenceBridgeCoordinator:
                 )
             ],
             "pairing": pairing,
+            "local_receiver": self.local_receiver.status,
         }
 
     def identity_payload(self, identity_id: str) -> dict[str, Any]:

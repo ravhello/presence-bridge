@@ -2,3 +2,4 @@
 pytest==8.4.2
 aiohttp>=3.12,<4
 ruff==0.12.11
+dbus-fast>=2.24,<6

@@ -1,0 +1,38 @@
+name: Hardware compatibility
+description: Report a tested receiver/OS combination without private device identifiers.
+title: "[Hardware]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not post QR codes, Bluetooth addresses, IRKs, passwords or HA backups. Report actual tests, not inferred support."
+  - type: input
+    id: hardware
+    attributes:
+      label: Adapter model and CPU architecture
+    validations:
+      required: true
+  - type: input
+    id: software
+    attributes:
+      label: OS, BlueZ/driver, HA, receiver and iOS/app versions
+    validations:
+      required: true
+  - type: checkboxes
+    id: tested
+    attributes:
+      label: Physically verified scenarios
+      options:
+        - label: New pairing, protected acknowledgement, HA saved identity and app success
+        - label: Healthy saved bond reused
+        - label: Bond removed only on the phone
+        - label: Bond removed only on the receiver
+        - label: Cancellation, rejection and five-minute timeout
+        - label: HA/receiver/MQTT restart and recovery
+        - label: Scoped removal without disturbing another device
+        - label: Passive presence after phone screen lock and leave/return
+  - type: textarea
+    id: results
+    attributes:
+      label: Results and remaining limits
+    validations:
+      required: true

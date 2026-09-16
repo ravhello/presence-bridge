@@ -1216,7 +1216,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(connect.await_args.kwargs["use_cached_services"])
         self.assertTrue(connect.await_args.kwargs["filter_services"])
 
-    async def test_every_qr_discovery_is_bounded_and_scoped_to_current_service(
+    async def test_qr_discovery_has_one_bounded_full_lookup_fallback(
         self,
     ) -> None:
         client = ReverseGattPairingClient(
@@ -1245,9 +1245,13 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             connect.reset_mock()
             with self.assertRaises(TimeoutError):
                 await client._open_candidate(SimpleNamespace(address="test"), 90)
-            self.assertEqual(connect.await_count, 2)
-            self.assertTrue(
-                all(call.kwargs["filter_services"] for call in connect.await_args_list)
+            self.assertEqual(connect.await_count, 3)
+            self.assertEqual(
+                [c.kwargs["filter_services"] for c in connect.await_args_list],
+                [True, True, False],
+            )
+            self.assertLessEqual(
+                connect.await_args_list[-1].kwargs["connection_timeout"], 12
             )
             self.assertTrue(
                 all(

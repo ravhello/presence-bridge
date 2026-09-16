@@ -9,9 +9,10 @@
     "step": {
       "user": {
         "data": {
-          "name": "Name"
+          "name": "Name",
+          "local_receiver": "Local Linux receiver (experimental, no MQTT)"
         },
-        "description": "Presence Bridge uses your existing MQTT integration and keeps all identity processing local.",
+        "description": "Choose local Linux if HA can access BlueZ, D-Bus, a BLE central/peripheral adapter and read-only bond storage. Otherwise disable this option and configure MQTT for a separate Windows/Linux receiver. Presence Pair on iOS 17+ is required. Passive proxies cannot enroll phones. The panel reports missing local capabilities. [Guide]({guide_url})",
         "title": "Set up Presence Bridge"
       }
     }
@@ -20,10 +21,13 @@
     "step": {
       "init": {
         "title": "Presence timing",
-        "description": "Tune expiry windows for intermittent iPhone advertisements and observer health.",
+        "description": "Configure timeouts and the optional Linux receiver. Changes reload this integration and cancel any active pairing.",
         "data": {
           "away_timeout": "Phone away timeout (seconds)",
-          "observer_timeout": "Observer offline timeout (seconds)"
+          "observer_timeout": "Observer offline timeout (seconds)",
+          "local_receiver": "Local Linux receiver (experimental, no MQTT)",
+          "local_adapter": "Linux adapter MAC (empty: use the only adapter)",
+          "bluez_storage": "Read-only BlueZ storage path"
         }
       }
     }

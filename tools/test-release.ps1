@@ -4,8 +4,9 @@ $root = Split-Path $PSScriptRoot -Parent
 $version = (Get-Content -LiteralPath (Join-Path $root 'custom_components/presence_bridge/manifest.json') -Raw | ConvertFrom-Json).version
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $packages = @(
-    @{ Name = "presence_bridge-$version.zip"; Source = 'custom_components/presence_bridge'; Required = @('manifest.json','__init__.py','signal_api.py','signal_access.py','native_bluetooth.py','person_link.py','frontend/panel.js') },
-    @{ Name = "presence-bridge-windows-$version.zip"; Source = 'bridge/windows'; Required = @('observer.py','protocol.py','gatt_server.py','reverse_gatt_client.py','interactive_pairing_helper.py','numeric_pairing_probe.py','identity_removal.py','adapter_info.py','requirements.txt','install.ps1','uninstall.ps1','installer-access.ps1','config.example.json') }
+    @{ Name = "presence-bridge-linux-$version.zip"; Source = '.'; Required = @('bridge/linux/receiver.py','bridge/linux/requirements.txt','bridge/linux/install.sh','bridge/linux/presence-bridge.service','bridge/linux/Dockerfile','bridge/linux/compose.yaml','custom_components/presence_bridge/protocol.py','custom_components/presence_bridge/receiver/engine.py','custom_components/presence_bridge/receiver/bluez.py','custom_components/presence_bridge/receiver/keys.py','docs/linux.md','LICENSE') },
+    @{ Name = "presence_bridge-$version.zip"; Source = 'custom_components/presence_bridge'; Required = @('manifest.json','__init__.py','signal_api.py','signal_access.py','native_bluetooth.py','person_link.py','frontend/panel.js','frontend/panel-element.js','frontend/presence-pair-launch.js','strings.json','translations/en.json','translations/it.json') },
+    @{ Name = "presence-bridge-windows-$version.zip"; Source = 'bridge/windows'; Required = @('observer.py','protocol.py','gatt_server.py','reverse_gatt_client.py','interactive_pairing_helper.py','numeric_pairing_probe.py','identity_removal.py','adapter_info.py','requirements.txt','install.ps1','uninstall.ps1','installer-access.ps1','config.example.json','README.md') }
 )
 foreach ($package in $packages) {
     $path = Join-Path $ReleaseDirectory $package.Name

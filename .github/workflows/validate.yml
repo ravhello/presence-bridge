@@ -10,6 +10,25 @@ permissions:
   contents: read
 
 jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest tests
+      - run: python bridge/linux/receiver.py --help
+      - run: python -c "from dbus_fast.aio import MessageBus; print('Linux D-Bus runtime import OK')"
+      - run: bash -n bridge/linux/install.sh
+      - if: matrix.python == '3.13'
+        run: docker build -f bridge/linux/Dockerfile -t presence-bridge-linux:test .
+
   python:
     runs-on: windows-latest
     steps:
@@ -22,6 +41,7 @@ jobs:
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m pytest
+      - run: node --test tests/test_app_launch.mjs tests/test_setup_panel.mjs
       - run: powershell -NoProfile -File bridge/windows/test-installer-access.ps1
 
   hassfest:

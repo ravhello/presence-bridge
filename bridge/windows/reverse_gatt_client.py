@@ -19,6 +19,12 @@ from bleak.exc import (
     BleakError,
     BleakGATTProtocolError,
 )
+from identity_removal import (
+    compact_address,
+    list_bonded_devices,
+    select_bond_devices,
+    unpair_device,
+)
 from protocol import (
     PairingLink,
     acceptance_proof,
@@ -45,6 +51,7 @@ PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS = 300.0
 MIN_PAIRING_RSSI_DBM = -82
 MAX_ENCRYPTED_ACK_REJECTIONS = 3
 MAX_POST_BOND_DISCOVERY_FAILURES = 2
+MAX_INITIAL_DISCOVERY_FAILURES = 3
 GATT_PAYLOAD_READ_TIMEOUT_SECONDS = 10.0
 
 
@@ -87,6 +94,10 @@ class EncryptedAcknowledgementRejectedError(ReverseGattError):
 
 class PairingDiagnosticError(ReverseGattError):
     """A one-shot pairing experiment must stop without normal-path retries."""
+
+
+class ServiceDiscoveryBlockedError(ReverseGattError):
+    """The current QR service cannot be opened after bounded clean attempts."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +157,11 @@ class ReverseGattPairingClient:
         self._ack_auth_failures: dict[str, int] = {}
         self._authenticated_ack_addresses: set[str] = set()
         self._fresh_discovery_addresses: set[str] = set()
+        self._initial_discovery_failures: dict[str, int] = {}
+        self._qr_verified_addresses: set[str] = set()
+        self._reused_bond_addresses: set[str] = set()
+        self._created_bond_addresses: set[str] = set()
+        self._bond_repair_used = False
 
     @property
     def lease_payload(self) -> dict[str, Any]:
@@ -299,6 +315,91 @@ class ReverseGattPairingClient:
         client = BleakClient(device, timeout=15, winrt=winrt)
         await asyncio.wait_for(client.unpair(), timeout=15)
 
+    async def _remove_verified_peer_bonds(self, device: Any, client: Any) -> None:
+        """Remove both transports of the exact verified Windows phone only."""
+        requester = getattr(getattr(client, "_backend", None), "_requester", None)
+        native_address = getattr(requester, "bluetooth_address", None)
+        if sys.platform == "win32" and (
+            client is None or isinstance(native_address, int)
+        ):
+            addresses = {compact_address(str(getattr(device, "address", "") or ""))}
+            if isinstance(native_address, int):
+                addresses.add(f"{native_address:012X}")
+            addresses.discard("")
+            inventory = await list_bonded_devices()
+            # Container expansion starts from a BLE endpoint, not from a name
+            # or a coincidentally similar classic Bluetooth address.
+            direct = [
+                d for d in inventory if d.transport == "ble" and d.address in addresses
+            ]
+            targets = select_bond_devices(
+                [{"registry_leaf": d.address} for d in direct], inventory
+            )
+            if not targets:
+                raise RuntimeError(
+                    "The verified phone has no identifiable saved BLE bond"
+                )
+            other_ids = {d.device_id for d in inventory if d not in targets}
+            if client is not None:
+                await self._release_client(client)
+            for target in targets:
+                await unpair_device(target)
+            remaining = await list_bonded_devices()
+            remaining_ids = {d.device_id for d in remaining}
+            target_ids = {d.device_id for d in targets}
+            if target_ids & remaining_ids or not other_ids.issubset(remaining_ids):
+                raise RuntimeError("Saved-bond removal could not be verified")
+        elif client is not None:
+            await client.unpair()
+        else:
+            await self._unpair_candidate(
+                device, address_type=self._windows_address_type(device)
+            )
+
+    async def _repair_verified_bond(
+        self, device: Any, client: Any, deadline: float
+    ) -> None:
+        """Repair once per QR attempt, never from a timeout or advertisement alone."""
+        address = str(getattr(device, "address", "") or "").casefold()
+        if address not in self._qr_verified_addresses or self._bond_repair_used:
+            raise PairingDiagnosticError(
+                "Automatic bond repair is not authorized for this peer or was already used",
+                "iphone_bond_repair_unavailable",
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 5:
+            raise ReverseGattTimeoutError(
+                "No time remains for safe bond recovery", "iphone_bond_repair_timeout"
+            )
+        self._bond_repair_used = True
+        self._progress(
+            "iphone_bond_repairing",
+            "Repairing only this QR-verified phone's saved pairing",
+        )
+        try:
+            await asyncio.wait_for(
+                self._remove_verified_peer_bonds(device, client),
+                timeout=min(15, remaining),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise PairingDiagnosticError(
+                "The receiver could not verify removal of this phone's old bond; recovery stopped",
+                "iphone_bond_reset_failed",
+            ) from error
+        self._secure_bond_confirmed = False
+        self._authenticated_ack_addresses.discard(address)
+        self._reused_bond_addresses.discard(address)
+        self._fresh_discovery_addresses.add(address)
+        self._initial_discovery_failures.pop(address, None)
+        self._ack_auth_failures.pop(address, None)
+        raise BondResetRequiredError(
+            "The old receiver-side bond was removed for this verified phone only. "
+            "Reconnecting now; accept Pair on the iPhone if requested.",
+            "iphone_bond_reset",
+        )
+
     async def _connect_candidate(
         self,
         device: Any,
@@ -393,6 +494,23 @@ class ReverseGattPairingClient:
             return f"unavailable:{type(error).__name__}"
         return ";".join(inventory) or "empty"
 
+    @staticmethod
+    async def _candidate_has_saved_bond(device: Any) -> bool | None:
+        """Read only the candidate's saved-bond status; never connect or unpair."""
+        if sys.platform != "win32":
+            return None
+        address = compact_address(str(getattr(device, "address", "") or ""))
+        if not address:
+            return None
+        try:
+            devices = await asyncio.wait_for(list_bonded_devices(), timeout=3)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            LOGGER.info("Saved-bond inspection unavailable: %s", type(error).__name__)
+            return None
+        return any(row.address == address and row.transport == "ble" for row in devices)
+
     async def _open_candidate(
         self,
         device: Any,
@@ -400,6 +518,7 @@ class ReverseGattPairingClient:
     ) -> BleakClient:
         """Try discovery, then let the caller repair only the QR-selected peer."""
         deadline = time.monotonic() + min(82.0, time_budget)
+        address = str(getattr(device, "address", "") or "").casefold()
         detected_type = self._windows_address_type(device)
         strategies: list[_ConnectionStrategy] = []
         if self._secure_bond_confirmed:
@@ -474,7 +593,6 @@ class ReverseGattPairingClient:
             )
             # After pairing, reuse the services Windows just discovered first.
             # Never ask for pairing again before verifying the current QR.
-            address = str(getattr(device, "address", "") or "").casefold()
             if address in self._fresh_discovery_addresses:
                 # A cached UUID list is not proof that its characteristic handles
                 # still work after bonding. Never retry known-unreadable handles.
@@ -482,6 +600,20 @@ class ReverseGattPairingClient:
             else:
                 strategies = (
                     [cached, fresh] if self._secure_bond_confirmed else [fresh, cached]
+                )
+            if self._initial_discovery_failures.get(address) == 1:
+                # Some Windows caches cannot filter a newly published iOS UUID.
+                # One complete discovery preserves the bond and still requires
+                # the exact session characteristic, QR claim and encrypted ACK.
+                strategies.append(
+                    _ConnectionStrategy(
+                        "uncached complete QR service lookup",
+                        detected_type,
+                        False,
+                        False,
+                        False,
+                        12.0,
+                    )
                 )
 
         last_error: BaseException | None = None
@@ -501,6 +633,7 @@ class ReverseGattPairingClient:
                 )
                 inventory = self._gatt_inventory(connected)
                 if self.session_uuid in inventory:
+                    self._initial_discovery_failures.pop(address, None)
                     return connected
                 LOGGER.warning(
                     "iPhone GATT connection opened without the Presence Pair "
@@ -536,6 +669,36 @@ class ReverseGattPairingClient:
 
         if last_error is None:
             raise TimeoutError("No time remained for a Bluetooth connection")
+        if (
+            not self._secure_bond_confirmed
+            and self._session_service_uuid is not None
+            and self._matched_service_uuid == self._session_service_uuid
+        ):
+            failures = self._initial_discovery_failures.get(address, 0) + 1
+            self._initial_discovery_failures[address] = failures
+            if failures >= MAX_INITIAL_DISCOVERY_FAILURES:
+                saved_bond = await self._candidate_has_saved_bond(device)
+                LOGGER.warning(
+                    "QR service discovery blocked: attempts=%d saved_bond=%s last_error=%s",
+                    failures,
+                    saved_bond,
+                    self._error_summary(last_error),
+                )
+                if saved_bond:
+                    raise ServiceDiscoveryBlockedError(
+                        "The receiver still remembers this iPhone, but cannot open its "
+                        "current app service. If the iPhone forgot the receiver, remove "
+                        "its saved receiver-side pairing too before trying again. No "
+                        "bond was erased and enrollment did not complete.",
+                        "iphone_saved_bond_unreachable",
+                    ) from last_error
+                raise ServiceDiscoveryBlockedError(
+                    "The iPhone is advertising this QR session, but its app service "
+                    "cannot be opened after three attempts. Keep Presence Pair open "
+                    "near the receiver and start a new attempt. No device was paired "
+                    "or removed.",
+                    "iphone_service_unreachable",
+                ) from last_error
         raise last_error
 
     async def _read_phone_payload(
@@ -762,6 +925,8 @@ class ReverseGattPairingClient:
                 "iphone_claim_received",
                 "Pairing code verified; waiting for the iPhone Bluetooth confirmation",
             )
+            address = str(getattr(device, "address", "") or "").casefold()
+            self._qr_verified_addresses.add(address)
 
             acknowledgement = json.dumps(
                 {
@@ -780,9 +945,33 @@ class ReverseGattPairingClient:
             # the session and HMAC claim have both been verified above.
             diagnostic_pairing = False
             if self.pairing_probe is not None:
-                diagnostic_pairing = await self.pairing_probe(client, link, deadline)
+                try:
+                    diagnostic_pairing = await self.pairing_probe(
+                        client, link, deadline
+                    )
+                except PairingDiagnosticError as error:
+                    if (
+                        error.detail_code == "numeric_pairing_saved_bond_weak"
+                        and getattr(self.pairing_probe, "allow_bond_repair", False)
+                        is True
+                        and allow_bond_reset
+                        and not self._bond_repair_used
+                    ):
+                        await self._repair_verified_bond(device, client, deadline)
+                    raise
             if diagnostic_pairing:
                 self._secure_bond_confirmed = True
+                if (
+                    getattr(self.pairing_probe, "reused_bond", False) is True
+                    and address not in self._created_bond_addresses
+                ):
+                    self._reused_bond_addresses.add(address)
+                    self._progress(
+                        "iphone_existing_bond_verified",
+                        "Reusing the saved pairing; checking the encrypted app exchange",
+                    )
+                elif getattr(self.pairing_probe, "reused_bond", None) is False:
+                    self._created_bond_addresses.add(address)
                 self._authenticated_ack_addresses.add(
                     str(getattr(device, "address", "") or "").casefold()
                 )
@@ -816,20 +1005,37 @@ class ReverseGattPairingClient:
                     if (
                         allow_bond_reset
                         and getattr(self.pairing_probe, "reused_bond", False) is True
+                        and address not in self._created_bond_addresses
                         and isinstance(error, BleakGATTProtocolError)
                         and error.code in {0x05, 0x0F}
                     ):
                         # Repair only an old bond whose exact QR-authenticated
                         # peer rejected encryption. Timeouts never justify this.
-                        await asyncio.wait_for(client.unpair(), timeout=15)
-                        self._secure_bond_confirmed = False
-                        self._authenticated_ack_addresses.discard(
-                            str(getattr(device, "address", "") or "").casefold()
+                        await self._repair_verified_bond(device, client, deadline)
+                    if (
+                        getattr(self.pairing_probe, "allow_link_recovery", False)
+                        is True
+                        and getattr(client, "is_connected", None) is False
+                        and isinstance(error, BleakError | OSError)
+                        and not isinstance(error, BleakGATTProtocolError)
+                        and time.monotonic() < deadline
+                    ):
+                        # WinRT can close the GATT link immediately after a
+                        # successful bond. Reopen it, not the pairing ceremony.
+                        # The outer loop bounds retries and revalidates QR,
+                        # authentication and the protected write on every route.
+                        address = str(getattr(device, "address", "") or "").casefold()
+                        self._fresh_discovery_addresses.add(address)
+                        self._progress(
+                            "iphone_bond_reconnecting",
+                            "Bluetooth pairing was accepted; the connection closed "
+                            "during confirmation. Reconnecting without removing "
+                            "the saved bond or restarting the timer",
                         )
-                        raise BondResetRequiredError(
-                            "The phone no longer accepts the saved bond; "
-                            "restarting pairing once for this verified phone only",
-                            "iphone_bond_reset",
+                        raise ReverseGattError(
+                            "Authenticated bond preserved after a closed confirmation "
+                            f"channel ({self._error_summary(error)})",
+                            "iphone_bond_reconnecting",
                         ) from error
                     raise PairingDiagnosticError(
                         "Numeric comparison completed, but the protected app "
@@ -887,26 +1093,7 @@ class ReverseGattPairingClient:
                         self._error_summary(error),
                     )
                 elif allow_bond_reset and self._is_stale_secure_bond_error(error):
-                    self._progress(
-                        "iphone_bond_reset",
-                        "The encrypted phone bond remained unusable after reconnecting; Windows is replacing it once",
-                    )
-                    reset_error: BaseException | None = None
-                    try:
-                        await asyncio.wait_for(client.unpair(), timeout=15)
-                    except BaseException as unpair_error:
-                        reset_error = unpair_error
-                        LOGGER.warning(
-                            "Unable to reset the verified iPhone bond: %s",
-                            self._error_summary(unpair_error),
-                        )
-                    detail = self._error_summary(error)
-                    if reset_error is not None:
-                        detail += f"; reset: {self._error_summary(reset_error)}"
-                    raise BondResetRequiredError(
-                        f"A saved phone bond blocked the secure link ({detail}); retrying",
-                        "iphone_bond_reset",
-                    ) from error
+                    await self._repair_verified_bond(device, client, deadline)
                 else:
                     raise
 
@@ -997,6 +1184,11 @@ class ReverseGattPairingClient:
         self._ack_auth_failures = {}
         self._authenticated_ack_addresses = set()
         self._fresh_discovery_addresses = set()
+        self._initial_discovery_failures = {}
+        self._qr_verified_addresses = set()
+        self._reused_bond_addresses = set()
+        self._created_bond_addresses = set()
+        self._bond_repair_used = False
         invitation_deadline = min(
             time.monotonic() + timeout_seconds,
             time.monotonic() + max(1, link.expires_at - int(time.time())),
@@ -1064,7 +1256,10 @@ class ReverseGattPairingClient:
                             3.0,
                             attempt_deadline - time.monotonic(),
                         ),
-                        allow_bond_reset=(device_address not in reset_bond_addresses),
+                        allow_bond_reset=(
+                            not self._bond_repair_used
+                            and device_address not in reset_bond_addresses
+                        ),
                     ),
                     timeout=min(
                         PAIRING_ATTEMPT_HARD_TIMEOUT_SECONDS,
@@ -1073,6 +1268,8 @@ class ReverseGattPairingClient:
                 )
             except BondResetRequiredError as err:
                 reset_bond_addresses.add(device_address)
+                post_bond_discovery_failures = 0
+                post_bond_write_failures.clear()
                 last_error = err
                 self._progress(err.detail_code, str(err))
             except SessionMismatchError as err:
@@ -1081,6 +1278,7 @@ class ReverseGattPairingClient:
             except (
                 EncryptedAcknowledgementRejectedError,
                 PairingDiagnosticError,
+                ServiceDiscoveryBlockedError,
             ) as err:
                 self._progress(err.detail_code, str(err))
                 raise
@@ -1089,6 +1287,29 @@ class ReverseGattPairingClient:
             except Exception as err:
                 # Missing services or a timeout do not prove a corrupt bond.
                 # Only the verified protected-exchange path may repair one.
+                failed_recovery = (
+                    device_address in self._reused_bond_addresses
+                    and device_address in self._qr_verified_addresses
+                    and not self._bond_repair_used
+                    and (
+                        post_bond_write_failures.get(device_address, 0) + 1
+                        >= MAX_ENCRYPTED_ACK_REJECTIONS
+                        if getattr(err, "detail_code", None)
+                        == "iphone_bond_reconnecting"
+                        else post_bond_discovery_failures + 1
+                        >= MAX_POST_BOND_DISCOVERY_FAILURES
+                    )
+                )
+                if failed_recovery:
+                    try:
+                        await self._repair_verified_bond(device, None, attempt_deadline)
+                    except BondResetRequiredError as repaired:
+                        reset_bond_addresses.add(device_address)
+                        post_bond_discovery_failures = 0
+                        post_bond_write_failures.clear()
+                        last_error = repaired
+                        self._progress(repaired.detail_code, str(repaired))
+                        continue
                 if (
                     self._secure_bond_confirmed
                     and getattr(err, "detail_code", None) == "iphone_bond_reconnecting"
@@ -1148,5 +1369,5 @@ class ReverseGattPairingClient:
         else:
             message = "The receiver did not find the iPhone before the code expired"
         if last_error is not None:
-            message += f". Last step: {last_error}"
+            message += f". Last step: {self._error_summary(last_error)}"
         raise ReverseGattTimeoutError(message, detail) from last_error
