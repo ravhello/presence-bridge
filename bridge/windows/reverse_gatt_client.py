@@ -53,6 +53,7 @@ MAX_ENCRYPTED_ACK_REJECTIONS = 3
 MAX_POST_BOND_DISCOVERY_FAILURES = 2
 MAX_INITIAL_DISCOVERY_FAILURES = 3
 GATT_PAYLOAD_READ_TIMEOUT_SECONDS = 10.0
+POST_BOND_SETTLE_SECONDS = 2.5
 
 
 class GattMetadataLogFilter(logging.Filter):
@@ -423,40 +424,63 @@ class ReverseGattPairingClient:
         if filter_services:
             kwargs["services"] = [self._matched_service_uuid or self.service_uuid]
         client = BleakClient(device, **kwargs)
-        self._disable_unowned_service_change_retry(client)
+        self._configure_services_changed_retry(
+            client,
+            enabled=pair_before_discovery,
+        )
+        connection = asyncio.create_task(client.connect())
         try:
-            await asyncio.wait_for(
-                client.connect(),
-                timeout=connection_timeout,
+            # wait_for cancels connect first, letting WinRT discard _session
+            # before we can revoke maintain_connection. Own cancellation here.
+            done, _pending = await asyncio.wait(
+                {connection}, timeout=connection_timeout
             )
+            if not done:
+                raise TimeoutError("Bluetooth service discovery timed out")
+            await connection
             return client
         except BaseException:
+            self._stop_maintaining_connection(client)
+            if not connection.done():
+                connection.cancel()
+            with suppress(BaseException):
+                await connection
             await self._release_client(client)
             raise
 
     @staticmethod
-    async def _release_client(client: BleakClient) -> None:
-        """Stop WinRT reconnects even when the last GATT status was CLOSED."""
+    def _stop_maintaining_connection(client: BleakClient) -> None:
+        """Revoke only our native connection request before its handle closes."""
         if sys.platform == "win32":
             session = getattr(getattr(client, "_backend", None), "_session", None)
             if session is not None:
                 with suppress(Exception):
                     session.maintain_connection = False
+
+    @staticmethod
+    async def _release_client(client: BleakClient) -> None:
+        """Stop WinRT reconnects even when the last GATT status was CLOSED."""
+        ReverseGattPairingClient._stop_maintaining_connection(client)
         with suppress(Exception):
             await asyncio.wait_for(client.disconnect(), timeout=5)
 
     @staticmethod
-    def _disable_unowned_service_change_retry(client: BleakClient) -> None:
-        """Keep discovery cancellation owned by the connect coroutine."""
+    def _configure_services_changed_retry(
+        client: BleakClient,
+        *,
+        enabled: bool,
+    ) -> None:
+        """Retry WinRT discovery when an authenticated bond changes services."""
         if sys.platform != "win32":
             return
         backend = getattr(client, "_backend", None)
         if backend is None or not hasattr(backend, "_retry_on_services_changed"):
             return
-        # Bleak's optional retry loop creates discovery/wait tasks that survive
-        # cancellation of connect(). They can overlap the next route or unpair.
-        # Use its default single awaited request; retry owned routes below.
-        backend._retry_on_services_changed = False
+        # Bleak's retry loop is needed for iOS immediately after bonding: the
+        # service table changes while get_gatt_services_async is running. Keep
+        # it enabled only for the authenticated route; all other routes retain
+        # the single-request cancellation behavior owned by this client.
+        backend._retry_on_services_changed = enabled
 
     @staticmethod
     async def _windows_reports_paired(client: BleakClient) -> bool:
@@ -591,20 +615,37 @@ class ReverseGattPairingClient:
             cached = _ConnectionStrategy(
                 "refreshed QR service discovery", detected_type, True, True, False, 6.0
             )
+            authenticated = _ConnectionStrategy(
+                "authenticated bond service discovery",
+                detected_type,
+                False,
+                False,
+                True,
+                18.0,
+            )
             # After pairing, reuse the services Windows just discovered first.
             # Never ask for pairing again before verifying the current QR.
-            if address in self._fresh_discovery_addresses:
+            if (
+                address in self._fresh_discovery_addresses
+                and not self._secure_bond_confirmed
+            ):
                 # A cached UUID list is not proof that its characteristic handles
                 # still work after bonding. Never retry known-unreadable handles.
                 strategies = [fresh]
             else:
                 strategies = (
-                    [cached, fresh] if self._secure_bond_confirmed else [fresh, cached]
+                    [authenticated, cached, fresh]
+                    if self._secure_bond_confirmed
+                    else [fresh, cached]
                 )
-            if self._initial_discovery_failures.get(address) == 1:
+            if (
+                self._initial_discovery_failures.get(address) == 1
+                or self._secure_bond_confirmed
+            ):
                 # Some Windows caches cannot filter a newly published iOS UUID.
-                # One complete discovery preserves the bond and still requires
-                # the exact session characteristic, QR claim and encrypted ACK.
+                # Bonding can also change the native service index. Try a full
+                # uncached lookup before counting a post-bond recovery failure.
+                # Session/claim reads and the protected ACK are still required.
                 strategies.append(
                     _ConnectionStrategy(
                         "uncached complete QR service lookup",
@@ -634,6 +675,11 @@ class ReverseGattPairingClient:
                 inventory = self._gatt_inventory(connected)
                 if self.session_uuid in inventory:
                     self._initial_discovery_failures.pop(address, None)
+                    LOGGER.info(
+                        "Presence Pair service route opened (%s, authenticated_bond=%s)",
+                        strategy.label,
+                        self._secure_bond_confirmed,
+                    )
                     return connected
                 LOGGER.warning(
                     "iPhone GATT connection opened without the Presence Pair "
@@ -685,11 +731,14 @@ class ReverseGattPairingClient:
                     self._error_summary(last_error),
                 )
                 if saved_bond:
+                    # A timeout cannot distinguish a radio/link failure from
+                    # stale keys. Only a QR/HMAC-verified peer's explicit
+                    # authentication rejection may trigger automatic repair.
                     raise ServiceDiscoveryBlockedError(
                         "The receiver still remembers this iPhone, but cannot open its "
-                        "current app service. If the iPhone forgot the receiver, remove "
-                        "its saved receiver-side pairing too before trying again. No "
-                        "bond was erased and enrollment did not complete.",
+                        "current app service. The saved pairing was preserved: "
+                        "a connection timeout does not prove that its keys are invalid. "
+                        "Enrollment did not complete; receiver diagnostics are required.",
                         "iphone_saved_bond_unreachable",
                     ) from last_error
                 raise ServiceDiscoveryBlockedError(
@@ -748,6 +797,54 @@ class ReverseGattPairingClient:
             )
         except (TypeError, ValueError):
             return False
+
+    async def _prepare_ios_protected_access(
+        self, client: Any, acknowledgement: bytes, deadline: float
+    ) -> None:
+        """Solicit iOS app security before explicit fresh native pairing."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise PairingDiagnosticError(
+                "No time remains to request the iPhone's protected attribute",
+                "iphone_protected_access_timeout",
+            )
+        self._progress(
+            "iphone_protected_access_requested",
+            "Requesting the iPhone app's protected attribute before Bluetooth pairing",
+        )
+        try:
+            # The iPhone enforces writeEncryptionRequired. Keep WinRT's default
+            # here so the ATT request reaches that attribute before PairAsync.
+            # The final write below still requires authenticated encryption.
+            await asyncio.wait_for(
+                client.write_gatt_char(
+                    self.result_uuid, acknowledgement, response=True
+                ),
+                timeout=min(20.0, remaining),
+            )
+        except BleakGATTProtocolError as error:
+            if error.code not in {0x05, 0x0F}:
+                raise PairingDiagnosticError(
+                    "The iPhone rejected the protected attribute request "
+                    f"(ATT 0x{error.code:02X})",
+                    "iphone_protected_access_rejected",
+                ) from error
+            self._progress(
+                "iphone_protected_access_requires_pairing",
+                "The iPhone app requires a secure link; starting authenticated pairing",
+            )
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError as error:
+            raise PairingDiagnosticError(
+                "The iPhone's protected attribute request did not finish in time",
+                "iphone_protected_access_timeout",
+            ) from error
+        else:
+            self._progress(
+                "iphone_protected_access_received",
+                "The app received the request; checking authenticated Bluetooth security",
+            )
 
     def _require_ack_encryption(
         self, client: Any, *, require_authentication: bool = False
@@ -941,14 +1038,32 @@ class ReverseGattPairingClient:
                 sort_keys=True,
             ).encode("utf-8")
 
-            # The Windows policy pairs before the protected write, only after
-            # the session and HMAC claim have both been verified above.
+            # The policy may first solicit the iOS-protected attribute for an
+            # unpaired peer. It must still verify an authenticated native bond
+            # before the final protected ACK can complete enrollment.
             diagnostic_pairing = False
             if self.pairing_probe is not None:
                 try:
-                    diagnostic_pairing = await self.pairing_probe(
-                        client, link, deadline
-                    )
+                    if (
+                        getattr(
+                            self.pairing_probe,
+                            "accepts_protected_access_trigger",
+                            False,
+                        )
+                        is True
+                    ):
+                        diagnostic_pairing = await self.pairing_probe(
+                            client,
+                            link,
+                            deadline,
+                            prepare_protected_access=lambda: self._prepare_ios_protected_access(
+                                client, acknowledgement, deadline
+                            ),
+                        )
+                    else:
+                        diagnostic_pairing = await self.pairing_probe(
+                            client, link, deadline
+                        )
                 except PairingDiagnosticError as error:
                     if (
                         error.detail_code == "numeric_pairing_saved_bond_weak"
@@ -976,10 +1091,8 @@ class ReverseGattPairingClient:
                     str(getattr(device, "address", "") or "").casefold()
                 )
 
-            # The iPhone requests bonding when this encryption-protected
-            # characteristic is accessed. Trigger that request before asking
-            # WinRT to pair explicitly; otherwise iOS may never show its Pair
-            # prompt and Bleak waits until timeout with no visible action.
+            # A successful early attribute request is not enough: require the
+            # final protected write after native security verification.
             self._require_ack_encryption(
                 client,
                 require_authentication=(
@@ -1024,8 +1137,10 @@ class ReverseGattPairingClient:
                         # successful bond. Reopen it, not the pairing ceremony.
                         # The outer loop bounds retries and revalidates QR,
                         # authentication and the protected write on every route.
-                        address = str(getattr(device, "address", "") or "").casefold()
-                        self._fresh_discovery_addresses.add(address)
+                        # A dropped link does not invalidate the services read
+                        # successfully just before bonding. Reuse that metadata
+                        # on a new client, but reread the QR/HMAC from the phone.
+                        # Only an unreadable payload disqualifies cached handles.
                         self._progress(
                             "iphone_bond_reconnecting",
                             "Bluetooth pairing was accepted; the connection closed "
@@ -1325,6 +1440,16 @@ class ReverseGattPairingClient:
                         )
                         self._progress(failure.detail_code, str(failure))
                         raise failure from err
+                    settle_for = min(
+                        POST_BOND_SETTLE_SECONDS,
+                        max(0.0, attempt_deadline - time.monotonic()),
+                    )
+                    if settle_for > 0:
+                        self._progress(
+                            "iphone_bond_settling",
+                            "Waiting briefly for Windows and iPhone to finish settling the authenticated bond",
+                        )
+                        await asyncio.sleep(settle_for)
                 if (
                     self._secure_bond_confirmed
                     and getattr(err, "detail_code", None) != "iphone_bond_reconnecting"

@@ -148,7 +148,7 @@ class AuthenticatedAckRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(native_pair.await_count, 2)
                 self.assertEqual(leases[0], leases[1])
-                self.assertIn(
+                self.assertNotIn(
                     device.address.casefold(), client._fresh_discovery_addresses
                 )
                 self.assertEqual(events[-1], "iphone_claim_accepted")

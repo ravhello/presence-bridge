@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 - Saved-bond recovery preview (2026-10-07)
+
+- Add administrator-confirmed, session-bound repair of the exact saved Windows bond.
+- Persist required iPhone preparation after verified removal, including across HA restart.
+- Preserve valid bonds on ordinary retry and require protected ACK and HA commit for success.
+- Release WinRT connection maintenance before cancellation; improve post-bond service discovery.
+- Keep the proximity beacon available during the protected exchange.
+- Publish matching HA, Windows and experimental Linux packages with source checksums.
+- Add an explicit physical acceptance checklist; the latest app/receiver combination
+  and broader hardware compatibility remain unverified, not implied by software tests.
+
 ## 0.2.0 - Public compatibility preview
 
 - Add experimental Linux BlueZ receiver, headless systemd and Docker packaging.

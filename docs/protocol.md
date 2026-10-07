@@ -46,6 +46,14 @@ receiver starts its bounded attempt on the first exact QR-scoped advertisement.
 The completion phase inherits that deadline; it never renews it. Seeing a generic
 Presence Pair advertisement cannot consume or extend another invitation.
 
+The Windows receiver keeps the same QR-scoped proximity beacon available after
+the initial proximity write, through service discovery, Bluetooth bonding, and
+the protected acknowledgement. The iPhone samples that beacon during the
+active exchange. If the signal is continuously too weak or disappears beyond
+the bounded gap, the app terminates the attempt with `PP-PROX-02`; it does not
+reuse the interrupted exchange and asks the user to start a fresh QR attempt.
+This is a proximity safety guard, not a calibrated distance measurement.
+
 After a matching live address is verified and its identity persisted, HA sends
 the receiver a non-retained MQTT `complete` command for the same active session.
 Only then does the receiver advertise a completion receipt for at most 20 seconds,
@@ -115,6 +123,30 @@ IRKs and raw addresses are omitted from entities, WebSocket UI payloads, logs,
 and diagnostics.
 
 ## Threat model
+
+### Saved-bond repair
+
+Following verified receiver-side removal, invitations can include the optional
+`reset=forget_receiver` query hint. This is phone-side preparation guidance only,
+not deletion authority. It does not alter the canonical claim, secret or derived
+GATT UUIDs. HA persists it by person/receiver across retries and restarts and
+clears it only with a verified identity commit. Supporting apps wait for explicit
+phone-side preparation before starting the radio transport; older apps retain
+the same protocol and see the guidance in the HA panel.
+
+An unreadable service does not authenticate a peer. Windows may offer a repair
+only after a session-scoped advertisement uniquely resolves to a stored IRK.
+An opaque, one-shot offer is bound to the failed session, observer, identity
+fingerprint and a ten-minute deadline. Only HA's administrator WebSocket command
+can confirm it; radio discovery alone never triggers an unpair.
+HA rejects identities assigned to another person or receiver. Windows rejects
+stale offers and cancels only that same failed attempt before using its existing
+interactive removal helper. SYSTEM verifies bond and key absence. HA then clears
+only that identity and creates a new invitation for the same person and receiver.
+The raw key never enters the repair command, UI, diagnostics or recovery journal.
+Offers are deliberately not persisted: after a restart a fresh attempt is needed.
+
+### Enrollment boundaries
 
 - An attacker who only sees Bluetooth traffic cannot forge either HMAC or
   recover the QR secret from a claim.

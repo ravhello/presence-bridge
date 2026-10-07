@@ -1,6 +1,7 @@
 """Exercise HA's actual status handler without starting Home Assistant."""
 
 import ast
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,6 +15,7 @@ def coordinator():
     source = (
         Path(__file__).parents[1] / "custom_components/presence_bridge/coordinator.py"
     )
+    source = Path(os.environ.get("PRESENCE_COORDINATOR_SOURCE", source))
     tree = ast.parse(source.read_text(encoding="utf-8"))
     selected = []
     for node in tree.body:
@@ -28,7 +30,10 @@ def coordinator():
             for target in node.targets
         ):
             selected.append(node)
-        if isinstance(node, ast.FunctionDef) and node.name == "_bounded_lease_deadline":
+        if isinstance(node, ast.FunctionDef) and node.name in {
+            "_bounded_lease_deadline",
+            "_observer_id_from_topic",
+        }:
             selected.append(node)
         if isinstance(node, ast.ClassDef) and node.name == "PresenceBridgeCoordinator":
             method = next(
@@ -56,7 +61,7 @@ def coordinator():
             "expires_at": 1100,
         },
         observers={},
-        _decode_payload=lambda message: message,
+        _decode_payload=lambda message: message.payload,
         _set_pairing_state=Mock(),
     )
 
@@ -64,13 +69,16 @@ def coordinator():
         clock.time = lambda: now
         namespace["_pairing_status_message"](
             obj,
-            {
-                "session_id": "same_session_1234",
-                "observer_id": "dell",
-                "state": "connecting",
-                "detail_code": code,
-                **extra,
-            },
+            SimpleNamespace(
+                topic="presence_bridge/v1/observers/dell/pairing/status",
+                payload={
+                    "session_id": "same_session_1234",
+                    "observer_id": "dell",
+                    "state": "connecting",
+                    "detail_code": code,
+                    **extra,
+                },
+            ),
         )
 
     return obj, send

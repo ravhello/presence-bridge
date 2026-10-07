@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import tempfile
 import time
@@ -129,6 +130,98 @@ class BlePresenceObserverTest(unittest.TestCase):
 
 
 class ScannerPairingCoordinationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_offer_never_resets_bond_and_requires_unique_scoped_match(self):
+        o = self.observer
+        o.config.interactive_pairing_task = "helper"
+        lease = {
+            "matched_address": "40:01:02:0A:C4:A6",
+            "session_scoped_advertisement": True,
+        }
+        row = {"irk": "00" * 16, "registry_leaf": "112233445566"}
+        with (
+            patch("observer.read_windows_private_ble_irks", return_value=[row]),
+            patch("observer.remove_identity_bonds", new=AsyncMock()) as remove,
+        ):
+            self.assertEqual(
+                await o._offer_bond_repair(
+                    "session", "iphone_service_unreachable", lease
+                ),
+                {},
+            )
+            self.assertEqual(
+                await o._offer_bond_repair(
+                    "session", "iphone_saved_bond_unreachable", {}
+                ),
+                {},
+            )
+            offer = await o._offer_bond_repair(
+                "session", "iphone_saved_bond_unreachable", lease
+            )
+            self.assertEqual(
+                offer["bond_repair"]["fingerprint"],
+                hashlib.sha256(bytes(16)).hexdigest(),
+            )
+            self.assertNotIn("irk", offer["bond_repair"])
+            remove.assert_not_awaited()
+        with patch("observer.read_windows_private_ble_irks", return_value=[]):
+            self.assertEqual(
+                await o._offer_bond_repair(
+                    "session", "iphone_saved_bond_unreachable", lease
+                ),
+                {},
+            )
+
+    async def test_repair_requires_current_offer_and_uses_interactive_removal(self):
+        o = self.observer
+        o.config.interactive_pairing_task = "helper"
+        o.config.interactive_pairing_command_path = "unused-command.json"
+        o._pause_scanner_for_pairing = AsyncMock()
+        o._run_interactive_identity_removal = AsyncMock()
+        o._active_pairing_session_id = "failed_session_1234"
+        offer = {
+            "repair_id": "repair_token_12345",
+            "session_id": o._active_pairing_session_id,
+            "fingerprint": "a" * 64,
+            "expires_at": time.time() + 600,
+        }
+        payload = {
+            **offer,
+            "action": "repair_pairing",
+            "request_id": "request_1234567890",
+            "observer_id": "dell_cucina",
+            "identity_id": "a" * 16,
+            "expires_at": time.time() + 75,
+        }
+        with patch(
+            "observer.remove_identity_bonds", new=AsyncMock(return_value=2)
+        ) as remove:
+            for wrong in (
+                None,
+                {**offer, "expires_at": 1},
+                {**offer, "repair_id": "wrong"},
+                {**offer, "session_id": "new_session"},
+            ):
+                o._bond_repair_offer = wrong
+                o._removal_results.clear()
+                await o._run_identity_removal(payload)
+                remove.assert_not_awaited()
+            o._removal_results.clear()
+            o._bond_repair_offer = offer
+            await o._run_identity_removal(payload)
+            remove.assert_awaited_once()
+            callback = remove.await_args.args[3]
+            await callback([])
+            o._run_interactive_identity_removal.assert_awaited_once_with(
+                payload["request_id"], []
+            )
+            await o._run_identity_removal(payload)
+            remove.assert_awaited_once()
+            self.assertIsNone(o._bond_repair_offer)
+            await o._run_identity_removal(
+                {**payload, "request_id": "different_request_123"}
+            )
+            remove.assert_awaited_once()
+
     async def test_interactive_removal_checks_target_receipt_and_cleans_exchange(self):
         with tempfile.TemporaryDirectory() as directory:
             command = Path(directory) / "command.json"

@@ -5,6 +5,27 @@ permalink: /tutorial-it/
 
 # Tutorial in italiano
 
+## Se un vecchio abbinamento impedisce il collegamento
+
+Non cancellare gli abbinamenti che funzionano: vengono riutilizzati. Se HA
+mostra `iphone_saved_bond_unreachable`, usa **Ripara abbinamento**, quando
+disponibile. Conferma la rimozione del solo telefono indicato. Se il ricevitore
+compare ancora in Impostazioni > Bluetooth sull'iPhone, dimenticalo anche li.
+HA verifica la rimozione sul server e prepara un nuovo codice per la stessa
+persona. Non servono comandi PowerShell o accesso allo schermo del server.
+HA ricorda questa preparazione anche dopo un riavvio o la creazione di un altro
+QR. Con Presence Pair 219 o successiva, il nuovo codice apre prima una schermata
+di controllo: verifica l'elenco Bluetooth dell'iPhone e premi **Rimosso o non
+presente: continua**. Solo allora parte il Bluetooth. Se il ricevitore non e
+nell'elenco, puoi continuare senza rimuovere altri dispositivi. Le istruzioni
+restano anche accanto al QR in HA per chi usa una versione precedente dell'app.
+Un normale timeout o segnale debole non richiede questa cancellazione: il
+tentativo viene chiuso, ma l'abbinamento valido resta riutilizzabile.
+La riparazione guidata richiede il ricevitore Windows aggiornato con il suo
+helper interattivo; non viene promessa su hardware o percorsi Linux non testati.
+Se manca il pulsante, il telefono non e stato identificato con certezza: usa la
+diagnostica, non rimuovere altri dispositivi a caso.
+
 ## 1. Verifica i requisiti
 
 Questo tutorial descrive il percorso **Windows + MQTT**. Dalla versione 0.2.0
@@ -27,7 +48,7 @@ con HA avviene via MQTT e non richiede il passthrough USB.
 
 ## 2. Installa l'integrazione gratuita
 
-La versione attuale e la **0.2.0, anteprima pubblica**. Presence Pair e ancora
+La versione attuale e la **0.2.1, anteprima pubblica**. Presence Pair e ancora
 su TestFlight, non sull'App Store pubblico: per il primo abbinamento serve
 accedere all'app. L'integrazione si installa da HACS come repository
 personalizzato; non e ancora inclusa nel catalogo predefinito.
@@ -36,17 +57,17 @@ personalizzato; non e ancora inclusa nel catalogo predefinito.
 2. Dal menu con i tre puntini scegli **Repository personalizzati**.
 3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
    **Integrazione** e conferma.
-4. Abilita le pre-release per questo repository, seleziona **v0.2.0**, installa
+4. Abilita le pre-release per questo repository, seleziona **v0.2.1**, installa
    **Presence Bridge** e riavvia Home Assistant. HACS normalmente esclude le beta;
    vedi la [documentazione dell'interruttore beta](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
 
-In alternativa, estrai `presence_bridge-0.2.0.zip` dalla release nella cartella
+In alternativa, estrai `presence_bridge-0.2.1.zip` dalla release nella cartella
 `<config HA>/custom_components/presence_bridge/`. Il file `manifest.json` deve
 trovarsi direttamente in quella cartella, non in una sottocartella aggiuntiva.
 Prima di aggiornare crea un backup di HA, poi riavvia e aggiungi l'integrazione
-come sopra. Usa il pacchetto Windows della stessa versione 0.2.0.
+come sopra. Usa il pacchetto Windows della stessa versione 0.2.1.
 
 ## 3. Prepara il ricevitore Windows
 

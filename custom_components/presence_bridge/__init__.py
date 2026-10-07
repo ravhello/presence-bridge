@@ -170,7 +170,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 "name": "presence-bridge-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "js_url": f"{STATIC_URL}/panel.js?v=7",
+                "js_url": f"{STATIC_URL}/panel.js?v=8",
             }
         },
         require_admin=True,
@@ -320,9 +320,27 @@ async def websocket_remove_identity(
 
 @callback
 def _async_register_websocket_commands(hass: HomeAssistant) -> None:
+    websocket_api.async_register_command(hass, websocket_repair_pairing)
     websocket_api.async_register_command(hass, websocket_signal_monitor)
     websocket_api.async_register_command(hass, websocket_info)
     websocket_api.async_register_command(hass, websocket_start_pairing)
     websocket_api.async_register_command(hass, websocket_cancel_pairing)
     websocket_api.async_register_command(hass, websocket_set_observer_area)
     websocket_api.async_register_command(hass, websocket_remove_identity)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/repair_pairing",
+        vol.Required("repair_id"): cv.string,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_repair_pairing(hass, connection, msg):
+    try:
+        result = await _coordinator(hass).async_repair_pairing(msg["repair_id"])
+    except Exception as err:
+        connection.send_error(msg["id"], "repair_failed", str(err))
+        return
+    connection.send_result(msg["id"], result)

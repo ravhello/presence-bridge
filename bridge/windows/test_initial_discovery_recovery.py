@@ -1,4 +1,4 @@
-"""Keep pre-claim Windows discovery retries bounded without deleting bonds."""
+"""Keep QR-authorized Windows discovery recovery bounded and scoped."""
 
 from __future__ import annotations
 
@@ -9,10 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from protocol import PairingLink, pairing_service_uuid
-from reverse_gatt_client import (
-    ReverseGattPairingClient,
-    ServiceDiscoveryBlockedError,
-)
+from reverse_gatt_client import ReverseGattPairingClient, ServiceDiscoveryBlockedError
 
 
 class InitialDiscoveryRecoveryTest(unittest.IsolatedAsyncioTestCase):
@@ -40,17 +37,27 @@ class InitialDiscoveryRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=saved_bond),
             ) as inspect,
             patch.object(self.client, "_unpair_candidate", new=AsyncMock()) as unpair,
+            patch.object(
+                self.client,
+                "_repair_verified_bond",
+                new=AsyncMock(),
+            ) as repair,
+            patch.object(
+                self.client, "_remove_verified_peer_bonds", new=AsyncMock()
+            ) as remove,
             patch("reverse_gatt_client.asyncio.sleep", new=AsyncMock()),
         ):
             for _ in range(2):
                 with self.assertRaises(TimeoutError):
                     await self.client._open_candidate(self.device, 50)
-                inspect.assert_not_awaited()
             with self.assertRaises(ServiceDiscoveryBlockedError) as raised:
                 await self.client._open_candidate(self.device, 50)
             self.assertEqual(connect.await_count, 7)
             inspect.assert_awaited_once_with(self.device)
             unpair.assert_not_awaited()
+            repair.assert_not_awaited()
+            remove.assert_not_awaited()
+            self.assertFalse(self.client._bond_repair_used)
             self.assertTrue(
                 all(
                     not c.kwargs["pair_before_discovery"]
@@ -59,10 +66,11 @@ class InitialDiscoveryRecoveryTest(unittest.IsolatedAsyncioTestCase):
             )
             return raised.exception
 
-    async def test_saved_bond_gets_actionable_error_without_reset(self):
+    async def test_saved_bond_is_preserved_after_discovery_timeouts(self):
         failure = await self.run_blocked(True)
         self.assertEqual(failure.detail_code, "iphone_saved_bond_unreachable")
-        self.assertIn("If the iPhone forgot", str(failure))
+        self.assertIn("saved pairing was preserved", str(failure))
+        self.assertNotIn("Remove", str(failure))
 
     async def test_no_bond_is_not_misdiagnosed_as_stale_pairing(self):
         failure = await self.run_blocked(False)

@@ -10,12 +10,12 @@ and no permanent HA credential on the phone.
 
 [Install from GitHub](https://github.com/ravhello/presence-bridge){: .btn }
 
-## Public preview 0.2.0
+## Public preview 0.2.1
 
 The free integration and Windows/Linux receivers are available in the
-[0.2.0 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.0).
+[0.2.1 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.1).
 Use the HACS custom repository with pre-releases enabled, or install the ZIP
-manually. Read the [release notes]({{ site.baseurl }}/release-0.2.0/)
+manually. Read the [release notes]({{ site.baseurl }}/release-0.2.1/)
 for installation, upgrade and compatibility limits.
 
 The iPhone app is still in TestFlight. This integration publication does not
@@ -54,6 +54,7 @@ inside suitably configured HA or remotely over MQTT. [Linux setup](linux.md).
 - [Troubleshooting]({{ site.baseurl }}/troubleshooting/)
 - [Privacy]({{ site.baseurl }}/privacy/)
 - [Protocol and threat model]({{ site.baseurl }}/protocol/)
+- [Physical acceptance checklist]({{ site.baseurl }}/acceptance/)
 
 Presence Bridge is an independent project and is not affiliated with Nabu Casa,
 Apple, or Microsoft.

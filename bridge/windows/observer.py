@@ -15,10 +15,12 @@ import asyncio
 import base64
 import binascii
 import ctypes
+import hashlib
 import hmac
 import json
 import logging
 import re
+import secrets
 import signal
 import sys
 import time
@@ -44,7 +46,7 @@ from reverse_gatt_client import (
 )
 
 LOGGER = logging.getLogger("ble_presence_observer")
-BRIDGE_VERSION = "0.2.0"
+BRIDGE_VERSION = "0.2.1"
 OBSERVER_ID_RE = re.compile(r"^[a-z0-9_]{3,64}$")
 MAX_SERVICE_UUIDS = 12
 MAX_MANUFACTURER_IDS = 12
@@ -622,6 +624,7 @@ class BlePresenceObserver:
         self._ha_pairing_committed = asyncio.Event()
         self._app_attempt_expires_at: float | None = None
         self._removal_results: dict[str, dict[str, Any]] = {}
+        self._bond_repair_offer: dict[str, Any] | None = None
         self._scanner_pause_requested = asyncio.Event()
         self._scanner_stopped = asyncio.Event()
         self._scanner_stopped.set()
@@ -706,7 +709,7 @@ class BlePresenceObserver:
             payload = await self._pairing_commands.get()
             action = str(payload.get("action") or "").strip().lower()
             session_id = str(payload.get("session_id") or "").strip()
-            if action == "forget_identity":
+            if action in {"forget_identity", "repair_pairing"}:
                 await self._run_identity_removal(payload)
                 continue
             if action == "complete":
@@ -780,6 +783,7 @@ class BlePresenceObserver:
                 with suppress(asyncio.CancelledError):
                     await self._active_pairing_task
             self._active_pairing_action = action
+            self._bond_repair_offer = None
             self._active_pairing_session_id = session_id
             self._ha_pairing_committed.clear()
             self._app_attempt_expires_at = None
@@ -829,6 +833,26 @@ class BlePresenceObserver:
         }
         paused = False
         try:
+            if payload.get("action") == "repair_pairing":
+                offer = self._bond_repair_offer
+                if (
+                    not offer
+                    or offer["expires_at"] <= time.time()
+                    or any(
+                        payload.get(key) != offer[key]
+                        for key in ("repair_id", "session_id", "fingerprint")
+                    )
+                    or self._active_pairing_session_id != offer["session_id"]
+                ):
+                    raise RuntimeError(
+                        "Repair offer expired or no longer matches this attempt"
+                    )
+                self._bond_repair_offer = None
+                # Only the failed attempt may be stopped, never a newer pairing.
+                if self._active_pairing_task and not self._active_pairing_task.done():
+                    self._active_pairing_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await asyncio.wait_for(self._active_pairing_task, timeout=10)
             if (
                 self._active_pairing_task is not None
                 and not self._active_pairing_task.done()
@@ -869,6 +893,38 @@ class BlePresenceObserver:
         while len(self._removal_results) > 32:
             self._removal_results.pop(next(iter(self._removal_results)))
         self.mqtt.publish_bridge_json("identity_removal/result", result, retain=False)
+
+    async def _offer_bond_repair(
+        self, session_id: str, detail_code: str, lease: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Offer an admin-confirmed reset, never infer permission from radio discovery."""
+        if (
+            detail_code != "iphone_saved_bond_unreachable"
+            or lease.get("session_scoped_advertisement") is not True
+            or not self.config.interactive_pairing_task
+        ):
+            return {}
+        address = normalize_address(lease.get("matched_address"))
+        if not address:
+            return {}
+        try:
+            records = await asyncio.to_thread(
+                read_windows_private_ble_irks, strict=True
+            )
+            record = select_irk_record_for_address(records, address)
+            if not record:
+                return {}
+            fingerprint = hashlib.sha256(bytes.fromhex(record["irk"])).hexdigest()
+        except Exception:
+            LOGGER.warning("Unable to identify a unique saved bond for guided repair")
+            return {}
+        self._bond_repair_offer = {
+            "repair_id": secrets.token_urlsafe(24),
+            "session_id": session_id,
+            "fingerprint": fingerprint,
+            "expires_at": int(time.time()) + 600,
+        }
+        return {"bond_repair": dict(self._bond_repair_offer)}
 
     async def _run_interactive_identity_removal(
         self, request_id: str, targets: list[BondDevice]
@@ -1135,12 +1191,16 @@ class BlePresenceObserver:
                 with suppress(asyncio.CancelledError):
                     await heartbeat_task
                 heartbeat_task = None
+            repair = await self._offer_bond_repair(
+                link.session_id, exc.detail_code, progress["extra"]
+            )
             self._publish_pairing_status(
                 link.session_id,
                 exc.terminal_state,
                 str(exc),
                 detail_code=exc.detail_code,
                 transport=pairing_transport,
+                **repair,
             )
             if (
                 self.config.interactive_pairing_task
@@ -1274,7 +1334,12 @@ class BlePresenceObserver:
                         payload.get("detail_code") or "interactive_pairing"
                     )
                     message = str(payload.get("message") or detail_code)
-                    reported_lease: dict[str, int] = {}
+                    reported_lease: dict[str, Any] = {}
+                    address = normalize_address(payload.get("matched_address"))
+                    if address and payload.get("session_scoped_advertisement") is True:
+                        reported_lease.update(
+                            matched_address=address, session_scoped_advertisement=True
+                        )
                     try:
                         reported_rssi = int(payload.get("rssi"))
                     except (TypeError, ValueError):
@@ -1356,6 +1421,7 @@ class BlePresenceObserver:
                             secure_exchange_complete=secure_exchange_complete,
                         )
                     elif state == "error":
+                        progress_callback(detail_code, message, **reported_lease)
                         error_type = (
                             ReverseGattTimeoutError
                             if payload.get("failure_state") == "timeout"
