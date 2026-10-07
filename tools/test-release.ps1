@@ -8,8 +8,14 @@ $packages = @(
     @{ Name = "presence_bridge-$version.zip"; Source = 'custom_components/presence_bridge'; Required = @('manifest.json','__init__.py','signal_api.py','signal_access.py','native_bluetooth.py','person_link.py','frontend/panel.js','frontend/panel-element.js','frontend/presence-pair-launch.js','strings.json','translations/en.json','translations/it.json') },
     @{ Name = "presence-bridge-windows-$version.zip"; Source = 'bridge/windows'; Required = @('observer.py','protocol.py','gatt_server.py','reverse_gatt_client.py','interactive_pairing_helper.py','numeric_pairing_probe.py','identity_removal.py','adapter_info.py','requirements.txt','install.ps1','uninstall.ps1','installer-access.ps1','config.example.json','README.md') }
 )
+$checksumLines = @(Get-Content -LiteralPath (Join-Path $ReleaseDirectory 'SHA256SUMS.txt'))
+if ($checksumLines.Count -ne $packages.Count) { throw 'Unexpected checksum manifest contents' }
 foreach ($package in $packages) {
     $path = Join-Path $ReleaseDirectory $package.Name
+    $expected = '{0}  {1}' -f (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(), $package.Name
+    if (@($checksumLines | Where-Object { $_ -ceq $expected }).Count -ne 1) {
+        throw "Checksum missing or mismatched: $($package.Name)"
+    }
     $zip = [IO.Compression.ZipFile]::OpenRead($path)
     try {
         $names = @($zip.Entries | ForEach-Object FullName)

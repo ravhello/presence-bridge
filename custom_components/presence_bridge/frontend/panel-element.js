@@ -243,18 +243,28 @@ class PresenceBridgePanel extends HTMLElement {
   pairingView(pairing) {
     const terminal = ["complete", "error", "timeout", "cancelled"].includes(pairing.state);
     const guidance = this.pairingGuidance(pairing);
-    const canRenew = pairing.person_entity_id && pairing.observer_id && pairing.state !== "complete";
+    const canRepair = pairing.state === "error" && pairing.repair_id && Number(pairing.repair_expires_at) > Date.now() / 1000;
+    const canRenew = pairing.person_entity_id && pairing.observer_id && !["complete", "repairing"].includes(pairing.state) && !canRepair;
+    const repairAction = canRepair ? `<button class="secondary" data-action="repair" data-repair="${this.escape(pairing.repair_id)}" ${this._loading ? "disabled" : ""}><ha-icon icon="mdi:bluetooth-settings"></ha-icon>${this.text("Repair saved pairing", "Ripara abbinamento")}</button>` : "";
     const invitationConsumed = Boolean(pairing.invitation_consumed)
       || Boolean(pairing.expires_at && Number(pairing.expires_at) * 1000 <= Date.now());
     const deadline = this.pairingDeadline(pairing);
     return `<div class="pairing ${isAppleMobile() ? "on-device" : ""}">
       ${pairing.qr_data_uri && !terminal && !invitationConsumed ? `<div class="qr"><img alt="Pairing QR" src="${pairing.qr_data_uri}"></div>` : `<ha-icon icon="${pairing.state === "complete" ? "mdi:check-circle" : "mdi:bluetooth-connect"}" style="--mdc-icon-size:96px;color:var(--primary-color)"></ha-icon>`}
-      <div class="pair-info"><strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span>${deadline}${guidance ? `<div class="guidance ${guidance.tone}"><b>${this.escape(guidance.title)}</b><span>${this.escape(guidance.body)}</span>${pairing.advertisement_status ? `<span class="diagnostic">Dell BLE: ${this.escape(pairing.advertisement_status)}${pairing.advertisement_error && pairing.advertisement_error !== "success" && pairing.advertisement_error !== "none" ? ` · ${this.escape(pairing.advertisement_error)}` : ""}</span>` : ""}</div>` : ""}<div class="actions">${pairing.pairing_uri && !terminal && !invitationConsumed ? this.appLinks(pairing.pairing_uri) : ""}${canRenew ? `<button class="secondary" data-action="restart" data-person="${this.escape(pairing.person_entity_id)}" data-observer="${this.escape(pairing.observer_id)}"><ha-icon icon="mdi:qrcode-plus"></ha-icon>${this.text("New code", "Nuovo codice")}</button>` : ""}<button class="secondary" data-action="cancel"><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button></div></div>
+      <div class="pair-info">
+        <strong>${this.escape(pairing.person_name || "")}</strong><span>${this.escape(pairing.message || "")}</span><span class="muted">${this.escape(pairing.observer_name || "")}</span>
+        ${deadline}${guidance ? `<div class="guidance ${guidance.tone}"><b>${this.escape(guidance.title)}</b><span>${this.escape(guidance.body)}</span>${pairing.advertisement_status ? `<span class="diagnostic">Dell BLE: ${this.escape(pairing.advertisement_status)}${pairing.advertisement_error && pairing.advertisement_error !== "success" && pairing.advertisement_error !== "none" ? ` · ${this.escape(pairing.advertisement_error)}` : ""}</span>` : ""}</div>` : ""}
+        <div class="actions">
+          ${repairAction}${pairing.pairing_uri && !terminal && !invitationConsumed ? this.appLinks(pairing.pairing_uri) : ""}
+          ${canRenew ? `<button class="secondary" data-action="restart" data-person="${this.escape(pairing.person_entity_id)}" data-observer="${this.escape(pairing.observer_id)}"><ha-icon icon="mdi:qrcode-plus"></ha-icon>${this.text("New code", "Nuovo codice")}</button>` : ""}
+          <button class="secondary" data-action="cancel" ${pairing.state === "repairing" ? "disabled" : ""}><ha-icon icon="mdi:${terminal ? "close" : "cancel"}"></ha-icon>${terminal ? this.text("Close", "Chiudi") : this.text("Cancel", "Annulla")}</button>
+        </div>
+      </div>
     </div>`;
   }
 
   pairingDeadline(pairing) {
-    if (["complete", "error", "timeout"].includes(pairing.state)) return "";
+    if (["complete", "error", "timeout", "repairing"].includes(pairing.state)) return "";
     const consumed = Boolean(pairing.invitation_consumed);
     const handoff = Boolean(pairing.handoff_started) && !consumed;
     const expiresAt = Number(
@@ -280,6 +290,27 @@ class PresenceBridgePanel extends HTMLElement {
   }
 
   pairingGuidance(pairing) {
+    if (pairing.state === "repairing") return null;
+    if (pairing.phone_bond_reset_required && !["complete", "cancelled"].includes(pairing.state) && !pairing.invitation_consumed) {
+      return {
+        tone: "error",
+        title: this.text("Check the old iPhone pairing", "Controlla il vecchio abbinamento sull'iPhone"),
+        body: this.text(
+          "Receiver-side removal is confirmed. On the iPhone open Settings > Bluetooth, find this receiver and choose Forget This Device if listed. Then open the new invitation. Presence Pair 219 or newer waits for your confirmation before connecting. Other devices are unchanged.",
+          "Rimozione dal ricevitore confermata. Sull'iPhone apri Impostazioni > Bluetooth, cerca questo ricevitore e scegli Dissocia questo dispositivo se presente. Poi apri il nuovo collegamento. Presence Pair 219 o successiva attende la tua conferma prima di connettersi. Gli altri dispositivi restano invariati."
+        ),
+      };
+    }
+    if (pairing.detail_code === "iphone_saved_bond_unreachable") {
+      return {
+        tone: "error",
+        title: this.text("Saved pairing needs attention", "Abbinamento salvato da verificare"),
+        body: this.text(
+          "The receiver found this iPhone but cannot open its service using the saved bond. This can happen when only one side forgets the pairing. Repair removes only this phone on the receiver. If it is still listed on the iPhone, forget the receiver there too, then use the new code.",
+          "Il ricevitore ha trovato questo iPhone ma non riesce ad aprire il servizio con l'abbinamento salvato. Può succedere quando si dissocia solo da un lato. Ripara rimuove solo questo telefono dal ricevitore. Se è ancora elencato sull'iPhone, dimentica il ricevitore anche lì, poi usa il nuovo codice."
+        ),
+      };
+    }
     if (pairing.state === "complete") {
       return {
         tone: "",
@@ -393,6 +424,7 @@ class PresenceBridgePanel extends HTMLElement {
     this.shadowRoot.querySelector('[data-action="refresh"]')?.addEventListener("click", () => this.load());
     this.shadowRoot.querySelector('[data-action="start"]')?.addEventListener("click", () => this.startPairing());
     this.shadowRoot.querySelector('[data-action="restart"]')?.addEventListener("click", (event) => this.restartPairing(event.currentTarget));
+    this.shadowRoot.querySelector('[data-action="repair"]')?.addEventListener("click", (event) => this.repairPairing(event.currentTarget));
     this.shadowRoot.querySelector('[data-action="cancel"]')?.addEventListener("click", () => this.cancelPairing());
     this.shadowRoot.querySelectorAll('[data-action="area"]').forEach((element) => element.addEventListener("change", (event) => this.setObserverArea(event.currentTarget)));
     this.shadowRoot.querySelectorAll('[data-action="remove"]').forEach((element) => element.addEventListener("click", (event) => this.removeIdentity(event.currentTarget)));
@@ -458,6 +490,24 @@ class PresenceBridgePanel extends HTMLElement {
       await this.load(true);
     } catch (error) {
       this._error = error?.message || String(error);
+      this.render();
+    }
+  }
+
+  async repairPairing(element) {
+    if (this._loading || !window.confirm(this.text(
+      "Reset only this iPhone's saved bond on the receiver? If the receiver is still listed in iPhone Bluetooth settings, forget it there too. Other devices and Wi-Fi will not change.",
+      "Azzerare solo l'abbinamento di questo iPhone sul ricevitore? Se il ricevitore compare ancora nelle impostazioni Bluetooth dell'iPhone, dimenticalo anche lì. Altri dispositivi e Wi-Fi non cambiano."
+    ))) return;
+    this._loading = true;
+    element.disabled = true;
+    try {
+      await this._hass.callWS({type: "presence_bridge/repair_pairing", repair_id: element.dataset.repair});
+      await this.load(true);
+    } catch (error) {
+      this._error = error?.message || String(error);
+    } finally {
+      this._loading = false;
       this.render();
     }
   }

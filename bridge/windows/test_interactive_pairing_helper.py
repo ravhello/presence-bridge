@@ -280,6 +280,8 @@ def test_current_transport_waits_for_proximity_then_pairs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    handoff_started = asyncio.Event()
+    pairing_started = asyncio.Event()
     proximity_stopped = asyncio.Event()
     status_updates: list[dict[str, object]] = []
     original_status = helper._status
@@ -296,11 +298,13 @@ def test_current_transport_waits_for_proximity_then_pairs(
 
         def start_handoff_lease(self) -> None:
             self.lease_payload["attempt_expires_at"] = int(time.time()) + 1_800
+            handoff_started.set()
 
         async def async_pair(
             self, _link: PairingLink, _timeout: int
         ) -> ReverseGattResult:
-            await proximity_stopped.wait()
+            await handoff_started.wait()
+            pairing_started.set()
             return ReverseGattResult(
                 address="AA:BB:CC:DD:EE:FF",
                 name="Presence Pair",
@@ -323,6 +327,7 @@ def test_current_transport_waits_for_proximity_then_pairs(
             return {"claim_verified": True}
 
         async def async_stop(self) -> None:
+            assert pairing_started.is_set()
             self.stopped = True
             proximity_stopped.set()
 
@@ -373,7 +378,6 @@ def test_current_transport_keeps_direct_path_for_existing_app_builds(
                 "iphone_advertisement_seen",
                 "iPhone found",
             )
-            await proximity_stopped.wait()
             return ReverseGattResult(
                 address="AA:BB:CC:DD:EE:FF",
                 name="Presence Pair",

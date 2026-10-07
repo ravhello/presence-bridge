@@ -294,19 +294,21 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
                         call.kwargs["use_cached_services"]
                         for call in connect.await_args_list
                     ],
-                    [False, True, False],
+                    [False, False, False],
                 )
                 self.assertTrue(
-                    all(
+                    [
                         call.kwargs["filter_services"]
                         for call in connect.await_args_list
-                    )
+                    ],
+                    [True, False, False],
                 )
                 self.assertTrue(
-                    all(
-                        not call.kwargs["pair_before_discovery"]
+                    [
+                        call.kwargs["pair_before_discovery"]
                         for call in connect.await_args_list
-                    )
+                    ],
+                    [False, True, False],
                 )
                 initial.pair.assert_awaited_once()
                 cached.write_gatt_char.assert_not_awaited()
@@ -1182,7 +1184,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(connect.await_args.kwargs["use_cached_services"])
         self.assertTrue(connect.await_args.kwargs["filter_services"])
 
-    async def test_confirmed_bond_reuses_cached_qr_services_without_pairing_again(
+    async def test_confirmed_bond_reconnects_through_authenticated_route_first(
         self,
     ) -> None:
         device = SimpleNamespace(address="40:01:02:0A:C4:A6")
@@ -1203,6 +1205,7 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
         client._session_service_uuid = "session-service"
         client._matched_service_uuid = "session-service"
         client._secure_bond_confirmed = True
+        client._fresh_discovery_addresses.add(device.address.casefold())
 
         with patch.object(
             client,
@@ -1212,9 +1215,9 @@ class ReverseGattPairingClientTest(unittest.IsolatedAsyncioTestCase):
             result = await client._open_candidate(device, 60)
 
         self.assertIs(result, connected)
-        self.assertFalse(connect.await_args.kwargs["pair_before_discovery"])
-        self.assertTrue(connect.await_args.kwargs["use_cached_services"])
-        self.assertTrue(connect.await_args.kwargs["filter_services"])
+        self.assertTrue(connect.await_args.kwargs["pair_before_discovery"])
+        self.assertFalse(connect.await_args.kwargs["use_cached_services"])
+        self.assertFalse(connect.await_args.kwargs["filter_services"])
 
     async def test_qr_discovery_has_one_bounded_full_lookup_fallback(
         self,

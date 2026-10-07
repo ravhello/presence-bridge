@@ -111,6 +111,66 @@ class NumericPairingTest(unittest.IsolatedAsyncioTestCase):
         self.args.accept.assert_not_called()
         self.custom.pair_with_protection_level_async.assert_awaited_once()
 
+    async def test_unpaired_peer_accesses_protected_app_before_native_pairing(self):
+        async def prepare():
+            self.custom.pair_with_protection_level_async.assert_not_awaited()
+
+        request = AsyncMock(side_effect=prepare)
+        await probe.pair_with_numeric_comparison(
+            self.client,
+            AsyncMock(return_value=True),
+            time.monotonic() + 3,
+            allow_authenticated_bond=True,
+            prepare_protected_access=request,
+        )
+        request.assert_awaited_once()
+        self.custom.pair_with_protection_level_async.assert_awaited_once()
+
+    async def test_saved_authenticated_bond_skips_protected_trigger(self):
+        self.info.pairing.is_paired = True
+        self.info.pairing.protection_level = Level.ENCRYPTION_AND_AUTHENTICATION
+        request = AsyncMock()
+        reused = await probe.pair_with_numeric_comparison(
+            self.client,
+            AsyncMock(),
+            time.monotonic() + 3,
+            allow_authenticated_bond=True,
+            prepare_protected_access=request,
+        )
+        self.assertTrue(reused)
+        request.assert_not_awaited()
+        self.custom.pair_with_protection_level_async.assert_not_awaited()
+
+    async def test_protected_trigger_failure_does_not_start_another_ceremony(self):
+        request = AsyncMock(
+            side_effect=PairingDiagnosticError(
+                "No response", "iphone_protected_access_timeout"
+            )
+        )
+        with self.assertRaises(PairingDiagnosticError) as raised:
+            await probe.pair_with_numeric_comparison(
+                self.client,
+                AsyncMock(return_value=True),
+                time.monotonic() + 3,
+                prepare_protected_access=request,
+            )
+        self.assertEqual(
+            raised.exception.detail_code, "iphone_protected_access_timeout"
+        )
+        self.custom.pair_with_protection_level_async.assert_not_awaited()
+
+    async def test_successful_protected_trigger_does_not_override_pairing_failure(self):
+        request = AsyncMock()
+        with self.assertRaises(PairingDiagnosticError):
+            await probe.pair_with_numeric_comparison(
+                self.client,
+                AsyncMock(return_value=False),
+                time.monotonic() + 3,
+                prepare_protected_access=request,
+            )
+        request.assert_awaited_once()
+        self.args.accept.assert_not_called()
+
     async def test_just_works_ceremony_is_not_accepted(self):
         self.args.pairing_kind = Kind.CONFIRM_ONLY
         confirm = AsyncMock(return_value=True)
@@ -418,11 +478,16 @@ class DiagnosticArmTest(unittest.IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(reply())
         try:
-            self.assertTrue(
-                await self.probe.confirm(
-                    self.link.session_id, "123456", time.monotonic() + 2
+            # File I/O latency must not expire this nonce/cleanup test. Deadline
+            # rejection has its own test; bound a broken confirmation externally.
+            clock = SimpleNamespace(time=time.time, monotonic=lambda: 1000.0)
+            with patch.object(probe, "time", clock):
+                self.assertTrue(
+                    await asyncio.wait_for(
+                        self.probe.confirm(self.link.session_id, "123456", 1002.0),
+                        timeout=15,
+                    )
                 )
-            )
         finally:
             await task
         self.assertFalse((self.root / probe.REQUEST_NAME).exists())

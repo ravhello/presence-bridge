@@ -291,8 +291,10 @@ async def _run(command_path: Path, result_path: Path) -> int:
                     ),
                     **client.lease_payload,
                 )
-                await proximity_server.async_stop()
-                proximity_server = None
+                # Keep the receiver beacon advertising while the iPhone is
+                # discovering services, bonding, and writing the protected ACK.
+                # The iOS app uses these continued RSSI samples to stop safely
+                # if the phone moves out of range. Cleanup stops it in finally.
                 peer = await client_task
         else:
             raise ValueError(f"Unsupported pairing transport: {transport}")

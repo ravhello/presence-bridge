@@ -46,6 +46,7 @@ async def pair_with_numeric_comparison(
     deadline: float,
     *,
     allow_authenticated_bond: bool = False,
+    prepare_protected_access: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
     """No Just Works fallback or unpair; consent is supplied by the caller."""
     if DeviceInformation is None:
@@ -83,6 +84,10 @@ async def pair_with_numeric_comparison(
                 raise _fail(
                     "Windows cannot pair this peer", "numeric_pairing_unavailable"
                 )
+            if prepare_protected_access is not None:
+                # Let iOS observe its app's protected attribute before an
+                # explicit native ceremony. This is never enrollment proof.
+                await prepare_protected_access()
             custom = info.pairing.custom
 
             async def approve(args: Any, deferral: Any) -> None:
@@ -199,6 +204,8 @@ class QRSessionPairing:
     verifying its claim. A native bond alone is never enrollment success.
     """
 
+    accepts_protected_access_trigger = True
+
     def __init__(self, directory, write_json, progress) -> None:
         self.diagnostic = NumericPairingProbe(directory, write_json, progress)
         self.progress = progress
@@ -206,7 +213,14 @@ class QRSessionPairing:
         self.allow_link_recovery = False
         self.allow_bond_repair = False
 
-    async def __call__(self, client: Any, link: PairingLink, deadline: float) -> bool:
+    async def __call__(
+        self,
+        client: Any,
+        link: PairingLink,
+        deadline: float,
+        *,
+        prepare_protected_access: Callable[[], Awaitable[None]] | None = None,
+    ) -> bool:
         self.reused_bond = False
         self.allow_link_recovery = False
         self.allow_bond_repair = False
@@ -226,7 +240,11 @@ class QRSessionPairing:
             return time.monotonic() < native_deadline
 
         self.reused_bond = await pair_with_numeric_comparison(
-            client, confirm, deadline, allow_authenticated_bond=True
+            client,
+            confirm,
+            deadline,
+            allow_authenticated_bond=True,
+            prepare_protected_access=prepare_protected_access,
         )
         self.allow_link_recovery = True
         self.progress(

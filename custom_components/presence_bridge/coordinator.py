@@ -165,6 +165,7 @@ class PresenceBridgeCoordinator:
         self._cipher_cache: dict[str, Any] = {}
         self._orphan_pairing_cancels: set[tuple[str, str]] = set()
         self._removal_requests: dict[str, dict[str, Any]] = {}
+        self._bond_repair_offer: dict[str, Any] | None = None
         self.local_receiver = LocalReceiver(self)
 
     @property
@@ -194,9 +195,13 @@ class PresenceBridgeCoordinator:
         if isinstance(stored, dict):
             identities = stored.get("identities")
             settings = stored.get("observer_settings")
+            phone_resets = stored.get("phone_bond_resets")
             self.memory = {
                 "identities": identities if isinstance(identities, dict) else {},
                 "observer_settings": settings if isinstance(settings, dict) else {},
+                "phone_bond_resets": phone_resets
+                if isinstance(phone_resets, dict)
+                else {},
             }
         self._rebuild_identity_states()
         refresh_native_observations(self)
@@ -224,6 +229,7 @@ class PresenceBridgeCoordinator:
         for request in self._removal_requests.values():
             request["future"].cancel()
         await self.async_cancel_pairing(publish=True)
+        self._bond_repair_offer = None
         await self.local_receiver.close()
         for unsubscribe in self._unsubscribers:
             unsubscribe()
@@ -553,6 +559,7 @@ class PresenceBridgeCoordinator:
             if same_target and still_valid and (not force_new or recent_forced_renewal):
                 return self.pairing_payload()
         await self.async_cancel_pairing(publish=True)
+        self._bond_repair_offer = None
 
         session_id = secrets.token_urlsafe(24)
         expires_at = int(time.time()) + timeout_seconds
@@ -580,7 +587,15 @@ class PresenceBridgeCoordinator:
             "private_key": private_key,
             "link": link,
         }
-        pairing_uri = f"{link.to_uri()}&{urlencode({'oname': selected.name[:100]})}"
+        phone_reset_required = bool(
+            self.memory.get("phone_bond_resets", {}).get(
+                f"{person_entity_id}:{selected.observer_id}"
+            )
+        )
+        app_options = {"oname": selected.name[:100]}
+        if phone_reset_required:
+            app_options["reset"] = "forget_receiver"
+        pairing_uri = f"{link.to_uri()}&{urlencode(app_options)}"
         qr_data_uri = await self.hass.async_add_executor_job(
             self._qr_data_uri,
             pairing_uri,
@@ -596,6 +611,7 @@ class PresenceBridgeCoordinator:
             effective_expires_at=expires_at,
             handoff_started=False,
             invitation_consumed=False,
+            phone_bond_reset_required=phone_reset_required,
             pairing_uri=pairing_uri,
             qr_data_uri=qr_data_uri,
         )
@@ -714,6 +730,7 @@ class PresenceBridgeCoordinator:
         if (
             payload.get("session_id") != session["session_id"]
             or payload.get("observer_id") != session["observer_id"]
+            or _observer_id_from_topic(message.topic) != session["observer_id"]
         ):
             return
         observer = self.observers.get(session["observer_id"])
@@ -818,6 +835,8 @@ class PresenceBridgeCoordinator:
                     "qr_data_uri": None,
                 }
             )
+        if state == "error" and detail_code == "iphone_saved_bond_unreachable":
+            status_extra.update(self._accept_bond_repair_offer(payload, session))
         self._set_pairing_state(
             state,
             str(payload.get("message") or "Pairing update")[:240],
@@ -958,6 +977,9 @@ class PresenceBridgeCoordinator:
             "protocol": 2,
             "identity_address": identity_address,
         }
+        self.memory.setdefault("phone_bond_resets", {}).pop(
+            f"{session['person_entity_id']}:{session['observer_id']}", None
+        )
         await self.store.async_save(self.memory)
         if self._pairing_session is not session:
             return
@@ -1008,6 +1030,7 @@ class PresenceBridgeCoordinator:
                         "effective_expires_at",
                         "handoff_started",
                         "invitation_consumed",
+                        "phone_bond_reset_required",
                         "pairing_uri",
                         "qr_data_uri",
                     }
@@ -1070,6 +1093,108 @@ class PresenceBridgeCoordinator:
         fingerprint = hashlib.sha256(bytes.fromhex(row["irk"])).hexdigest()
         if fingerprint[:16] != identity_id:
             raise HomeAssistantError("Private identity mismatch; removal stopped")
+        await self._async_request_bond_removal(observer_id, fingerprint)
+        await self._async_require_phone_reset(row.get("person_entity_id"), observer_id)
+        await self._async_forget_identity(identity_id)
+
+    async def _async_require_phone_reset(self, person_entity_id, observer_id) -> None:
+        """Remember verified server-side removal until this target enrolls again."""
+        if not str(person_entity_id or "").startswith("person."):
+            return
+        self.memory.setdefault("phone_bond_resets", {})[
+            f"{person_entity_id}:{observer_id}"
+        ] = True
+        await self.store.async_save(self.memory)
+
+    def _accept_bond_repair_offer(self, payload, session) -> dict[str, Any]:
+        offer = payload.get("bond_repair")
+        if not isinstance(offer, dict):
+            return {}
+        try:
+            deadline = float(offer.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            return {}
+        fingerprint = str(offer.get("fingerprint") or "")
+        repair_id = str(offer.get("repair_id") or "")
+        if (
+            not _PAIRING_SESSION_ID_RE.fullmatch(repair_id)
+            or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+            or offer.get("session_id") != session["session_id"]
+            or not time.time() < deadline <= time.time() + 610
+        ):
+            return {}
+        identity = self.memory.get("identities", {}).get(fingerprint[:16])
+        if identity and (
+            identity.get("person_entity_id") != session["person_entity_id"]
+            or identity.get("paired_by") != session["observer_id"]
+        ):
+            return {}
+        self._bond_repair_offer = {
+            **offer,
+            "person_entity_id": session["person_entity_id"],
+            "observer_id": session["observer_id"],
+        }
+        return {"repair_id": repair_id, "repair_expires_at": deadline}
+
+    async def async_repair_pairing(self, repair_id: str) -> dict[str, Any]:
+        """Explicit admin recovery of the exact saved bond from the failed attempt."""
+        async with self._pairing_lock:
+            offer = self._bond_repair_offer
+            if (
+                self._pairing_session is not None
+                or not offer
+                or offer["repair_id"] != repair_id
+                or offer["expires_at"] <= time.time()
+                or self.pairing_public.get("repair_id") != repair_id
+            ):
+                raise HomeAssistantError("Repair expired; start a new attempt")
+            observer = self.observers.get(offer["observer_id"])
+            if not observer or not observer.online:
+                raise HomeAssistantError("Receiver offline; nothing was removed")
+            identity_id = offer["fingerprint"][:16]
+            identity = self.memory.get("identities", {}).get(identity_id)
+            if identity and (
+                identity.get("person_entity_id") != offer["person_entity_id"]
+                or identity.get("paired_by") != offer["observer_id"]
+            ):
+                raise HomeAssistantError("Phone assignment changed; repair stopped")
+            self._bond_repair_offer = None
+            self._set_pairing_state(
+                "repairing", "Removing the saved bond and verifying Windows"
+            )
+            try:
+                await self._async_request_bond_removal(
+                    offer["observer_id"],
+                    offer["fingerprint"],
+                    {
+                        "action": "repair_pairing",
+                        "repair_id": repair_id,
+                        "session_id": offer["session_id"],
+                    },
+                )
+                await self._async_require_phone_reset(
+                    offer["person_entity_id"], offer["observer_id"]
+                )
+                if identity:
+                    await self._async_forget_identity(identity_id)
+                return await self._async_start_pairing_locked(
+                    offer["person_entity_id"],
+                    offer["observer_id"],
+                    DEFAULT_PAIRING_TIMEOUT,
+                    force_new=True,
+                )
+            except Exception:
+                self._set_pairing_state(
+                    "error",
+                    "Repair could not be completed; check the receiver before retrying",
+                    detail_code="bond_repair_failed",
+                )
+                raise
+
+    async def _async_request_bond_removal(
+        self, observer_id: str, fingerprint: str, extra: dict[str, Any] | None = None
+    ) -> None:
+        identity_id = fingerprint[:16]
         request_id = secrets.token_urlsafe(24)
         future = asyncio.get_running_loop().create_future()
         self._removal_requests[request_id] = {
@@ -1090,6 +1215,7 @@ class PresenceBridgeCoordinator:
                         "identity_id": identity_id,
                         "fingerprint": fingerprint,
                         "expires_at": time.time() + 75,
+                        **(extra or {}),
                     }
                 ),
                 qos=1,
@@ -1108,6 +1234,11 @@ class PresenceBridgeCoordinator:
                 )
         finally:
             self._removal_requests.pop(request_id, None)
+
+    async def _async_forget_identity(self, identity_id: str) -> None:
+        """Clear HA only after receiver removal has been verified."""
+        identities = self.memory["identities"]
+        row = identities[identity_id]
         identities.pop(identity_id)
         try:
             await self.store.async_save(self.memory)
@@ -1189,6 +1320,7 @@ class PresenceBridgeCoordinator:
         if not include_invitation:
             pairing.pop("pairing_uri", None)
             pairing.pop("qr_data_uri", None)
+            pairing.pop("repair_id", None)
         people = [
             {"entity_id": state.entity_id, "name": state.name}
             for state in sorted(

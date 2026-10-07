@@ -128,3 +128,26 @@ test("Italian onboarding and external links are localized and invitation-free", 
   assert.equal(links.length, 2);
   for (const link of links) assert.match(link, /rel="noopener noreferrer"/);
 });
+
+test("guided repair replaces blind renewal only for a live failed-attempt offer", () => {
+  const p = panel("it");
+  const pairing = {state: "error", detail_code: "iphone_saved_bond_unreachable",
+    person_entity_id: "person.test", observer_id: "windows", repair_id: "opaque_token",
+    repair_expires_at: Date.now() / 1000 + 60};
+  assert.match(p.pairingView(pairing), /data-action="repair"/);
+  assert.doesNotMatch(p.pairingView(pairing), /data-action="restart"/);
+  assert.match(p.pairingView(pairing), /Ripara abbinamento/);
+  assert.doesNotMatch(p.pairingView({...pairing, state: "complete"}), /data-action="repair"/);
+  assert.doesNotMatch(p.pairingView({...pairing, repair_expires_at: 1}), /data-action="repair"/);
+  assert.doesNotMatch(p.pairingView({...pairing, state: "repairing"}), /data-action="restart"/);
+  assert.match(p.pairingView({...pairing, state: "repairing"}), /data-action="cancel" disabled/);
+});
+
+test("verified server removal requires phone guidance, ordinary failure does not", () => {
+  const p = panel("it");
+  const pairing = {state: "preparing", phone_bond_reset_required: true};
+  assert.match(p.pairingGuidance(pairing).body, /Rimozione dal ricevitore confermata/);
+  assert.match(p.pairingGuidance(pairing).body, /Dissocia questo dispositivo/);
+  assert.notEqual(p.pairingGuidance({state: "preparing"})?.title, p.pairingGuidance(pairing).title);
+  assert.notEqual(p.pairingGuidance({...pairing, state: "complete"})?.title, p.pairingGuidance(pairing).title);
+});

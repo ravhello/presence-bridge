@@ -14,7 +14,7 @@ or export identity keys.
 
 | Component | Implemented support | Verification status |
 | --- | --- | --- |
-| Initial app pairing | Windows receiver, BLE central and peripheral roles; iOS 17+ Presence Pair | One physical iPhone/Dell setup completed authenticated GATT and HA storage on receiver 0.1.34; standard 0.1.35 path still needs a physical run |
+| Initial app pairing | Windows receiver, BLE central and peripheral roles; iOS 17+ Presence Pair | One physical iPhone/Dell setup completed protected exchange, HA commit and phone receipt after targeted repair. The final 0.2.1 / app 219 combination still needs the acceptance checklist; this is not multi-device certification. |
 | Windows passive tracking | MQTT Windows observer | Live deployment verified; coverage depends on antenna and phone advertisements |
 | Native HA Bluetooth tracking | Shared HA Bluetooth cache, including non-connectable scanners and supported proxies | Native API and timestamp behavior covered by local tests; per-installation runtime verification required |
 | HA host | HA OS, Container or other supported HA installation with MQTT | HA 2026.8.3 used for deployment; not every older HA release has been tested |
@@ -61,6 +61,12 @@ an old bond: weak protection, protected-write rejection or bounded persistent
 post-verification connection failures can trigger recovery. Pre-claim radio
 timeouts never authorize unpairing. See the [state matrix](partial-pairing-compatibility.md).
 These recovery changes are included in the 0.2.0 preview; older 0.1.36 archives do not contain them.
+
+Version 0.2.1 adds an explicit, administrator-confirmed repair for an exactly
+identified saved Windows bond that cannot be opened. An unverified radio timeout
+does not silently delete it. Verified removal persists iPhone preparation across
+HA restarts; app 219 or later asks the owner to forget the old iOS bond if present.
+Ordinary retries preserve valid bonds. See the [acceptance checklist](acceptance.md).
 
 The [installation matrix](setup.md) distinguishes HA hosting from enrollment.
 The integration does not install a Windows receiver or manage the host's radio

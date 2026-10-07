@@ -43,4 +43,9 @@ $linuxFiles = @(
 ) | ForEach-Object { Get-Item -LiteralPath (Join-Path $root $_) }
 $linuxFiles += @(Get-ChildItem -LiteralPath (Join-Path $componentRoot 'receiver') -File -Filter '*.py')
 New-ReleaseArchive ('presence-bridge-linux-' + $manifest.version + '.zip') $linuxFiles $root
+$checksums = Get-ChildItem -LiteralPath $OutputDirectory -File -Filter '*.zip' |
+    Sort-Object Name | ForEach-Object {
+        '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+    }
+$checksums | Set-Content -LiteralPath (Join-Path $OutputDirectory 'SHA256SUMS.txt') -Encoding ascii
 & (Join-Path $PSScriptRoot 'test-release.ps1') -ReleaseDirectory $OutputDirectory
