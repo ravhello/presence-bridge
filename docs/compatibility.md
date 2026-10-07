@@ -14,10 +14,10 @@ or export identity keys.
 
 | Component | Implemented support | Verification status |
 | --- | --- | --- |
-| Initial app pairing | Windows receiver, BLE central and peripheral roles; iOS 17+ Presence Pair | One physical iPhone/Dell setup completed protected exchange, HA commit and phone receipt after targeted repair. The final 0.2.1 / app 219 combination still needs the acceptance checklist; this is not multi-device certification. |
+| Initial app pairing | Windows receiver, BLE central and peripheral roles; iOS 17+ Presence Pair | One physical iPhone/Windows setup recorded successful app 219 enrollment on October 7, 2026: protected exchange, HA commit, phone receipt and fresh reception. Recovery-patched live versions were used; Windows enrollment files match 0.2.1. The exact 0.2.1 full matrix remains pending, not multi-device certification. |
 | Windows passive tracking | MQTT Windows observer | Live deployment verified; coverage depends on antenna and phone advertisements |
 | Native HA Bluetooth tracking | Shared HA Bluetooth cache, including non-connectable scanners and supported proxies | Native API and timestamp behavior covered by local tests; per-installation runtime verification required |
-| HA host | HA OS, Container or other supported HA installation with MQTT | HA 2026.8.3 used for deployment; not every older HA release has been tested |
+| HA host | HA OS, Container or other supported HA installation with MQTT | Live deployments observed on HA 2026.8.3 and 2026.9.4; not every HA release or installation mode has been physically tested |
 | Linux/BlueZ initial pairing | Experimental in-process or remote receiver, BlueZ key storage read-only | Behavioral tests only; physical Linux/iPhone and ARM certification pending |
 | ESPHome/Shelly/Sonoff initial pairing | Not implemented by Presence Bridge | Passive HA-compatible radio support does not imply enrollment support |
 | Android/Apple Watch enrollment via app | Not implemented by the iPhone app | Do not describe as universally compatible |
