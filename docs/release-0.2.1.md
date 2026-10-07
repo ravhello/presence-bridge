@@ -43,9 +43,18 @@ timeouts, cancellation, app links and prerequisites. Archive validation checks
 required files and source hashes. CI also exercises Linux-only storage cases.
 These checks do not replace RF tests or certify every driver/iPhone combination.
 
-The final 0.2.1 / iOS 219 physical run and review video are still required. Use
-the [acceptance checklist](acceptance.md). This is an opt-in preview, not a claim
-of universal compatibility or a stable App Store launch.
+On October 7, 2026, an owner-confirmed Presence Pair 219 physical recording
+showed same-device HA launch, proximity guidance, protected exchange, phone
+completion, persisted HA identity and fresh passive reception on one Windows
+setup. The installed integration was recovery-patched 0.1.36 on HA 2026.9.4;
+the receiver reported 0.1.35 with recovery patches. Its Windows enrollment files
+match this preview; observer differences are version/manufacturer labels only.
+This is not an exact 0.2.1 full-matrix test or Linux/hardware certification.
+
+The app and private recording were submitted to Apple; approval is pending.
+The complete [acceptance checklist](acceptance.md) remains required before
+promoting this integration to stable. This is an opt-in preview, not a claim
+of universal compatibility or a completed App Store launch.
 
 ## Rollback
 
