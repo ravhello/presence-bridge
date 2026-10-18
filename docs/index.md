@@ -50,6 +50,7 @@ inside suitably configured HA or remotely over MQTT. [Linux setup](linux.md).
 
 - [English tutorial]({{ site.baseurl }}/tutorial/)
 - [Italian tutorial]({{ site.baseurl }}/tutorial-it/)
+- [Offline demo QR (app build 220+)]({{ site.baseurl }}/demo/)
 - [Windows observer]({{ site.baseurl }}/windows-observer/)
 - [Troubleshooting]({{ site.baseurl }}/troubleshooting/)
 - [Privacy]({{ site.baseurl }}/privacy/)
