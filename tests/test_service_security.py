@@ -75,7 +75,6 @@ def test_bluetooth_is_a_required_dependency_not_an_optional_import():
     )
     assert "bluetooth" in manifest["dependencies"]
     assert "bluetooth" not in manifest["after_dependencies"]
-    assert manifest["categories"] == ["presence_location"]
 
 
 def real_ha_namespace(coordinator):

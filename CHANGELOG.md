@@ -9,7 +9,6 @@
   pairing responses only when requested by an authorized caller.
 - Keep `bluetooth` in required dependencies (already present in 0.2.1), with a
   regression test preventing accidental downgrade to an optional dependency.
-- Add the Presence & location manifest category, resolving the HACS metadata warning.
 - Add permission tests against the real HA service registry/helper in a separate
   CI job, alongside lightweight registration-contract tests.
 - Link the pending App Store listing and explicitly retain the HACS draft while
