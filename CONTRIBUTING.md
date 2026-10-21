@@ -12,6 +12,13 @@ Run `python -m pytest`, `python -m ruff check .`,
 Windows-specific runtime tests run on Windows. POSIX BlueZ storage tests run
 in Linux CI; skipping them on Windows is not proof they passed on Linux.
 
+`tests/test_service_security.py` also uses the real HA service registry/helper
+when Home Assistant is installed. The `ha-permissions` CI job installs pinned
+HA 2026.3.2 on Python 3.14 and must run those tests without skips. A receiver-only
+venv skips the HA-specific cases; passing its contract tests alone is not proof
+that the real admin permission boundary was exercised. These isolated tests do
+not load a home configuration, connect to a radio or restart a running HA.
+
 Use standard public GitHub-hosted runners only; no paid macOS jobs are needed
 for this repository. The proprietary iOS app is not built here.
 

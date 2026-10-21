@@ -6,9 +6,14 @@ Free, MIT-licensed Home Assistant integration and Bluetooth receivers for local
 iPhone presence and estimated room detection. No developer cloud or subscription.
 The separate Presence Pair iOS app remains proprietary and is free during testing.
 
-**0.2.1 is a public preview, not a universal hardware certification.** Linux is
-experimental. Presence Pair's public App Store release remains a separate Apple
-review process; access to the iPhone app is needed for enrollment.
+**0.2.2 is a public preview, not a universal hardware certification.** Linux is
+experimental. Presence Pair is required for initial enrollment. Its public
+[App Store listing](https://apps.apple.com/app/id6808059201) is pending Apple's
+approval and may not open yet. As of October 21, 2026, build 220 is waiting for
+review, not publicly downloadable. Do not install expecting to enroll an iPhone
+unless you already have legitimate testing access to the app. The default HACS
+submission remains on hold until the app is public; custom-repository access is
+for existing testers, not a workaround for this requirement.
 
 ## Choose The Shortest Setup
 
@@ -35,20 +40,33 @@ permissions, configure passthrough or install drivers.
 
 1. Add `https://github.com/ravhello/presence-bridge` to HACS custom repositories,
    category **Integration**. It is not yet in the default HACS catalog.
-2. Enable pre-releases, install **v0.2.1**, then restart HA once.
+2. Enable pre-releases, install **v0.2.2**, then restart HA once.
 3. Add **Presence Bridge** under Settings > Devices & services.
 4. Choose local Linux enrollment only if the host meets the requirements above.
    Otherwise configure HA's MQTT integration and install a remote receiver.
 5. Open the **Presence Bridge** sidebar panel. It shows missing prerequisites,
    pairing-capable receivers, passive scanners and person associations.
 
-Manual installation: extract `presence_bridge-0.2.1.zip` from
-[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.1) into
+Manual installation: extract `presence_bridge-0.2.2.zip` from
+[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.2) into
 `<config>/custom_components/presence_bridge/`. The archive is flat; do not add
 an extra directory layer. Back up HA before upgrading.
 
 Existing Windows/MQTT installations keep their configuration. Local Linux
 enrollment is opt-in for existing entries; it does not take over a radio on upgrade.
+
+## Administrator Access
+
+The panel, configuration WebSocket commands and all four services
+(`start_pairing`, `cancel_pairing`, `set_observer_area`, `remove_identity`) are
+administrator-only. Non-admin and unknown user contexts are rejected before
+the coordinator is accessed, so they cannot create/read invitations or change
+associations. HA's trusted internal automations without a user context remain
+supported through the standard admin-service helper; do not expose these
+actions through scripts or dashboards callable by untrusted users.
+
+Users of earlier releases should upgrade to 0.2.2 and restart HA to apply this
+permission fix. No pairing reset or receiver replacement is required.
 
 ## Pair And Use
 
@@ -80,7 +98,7 @@ decision source.
 - [Protocol](docs/protocol.md), [privacy](docs/privacy.md), [security](SECURITY.md)
 - [Report a bug or hardware result](https://github.com/ravhello/presence-bridge/issues/new/choose)
 - [English tutorial](docs/tutorial.md), [Italian tutorial](docs/tutorial-it.md)
-- [Release notes](docs/release-0.2.1.md), [changelog](CHANGELOG.md)
+- [Release notes](docs/release-0.2.2.md), [changelog](CHANGELOG.md)
 - [Physical acceptance checklist](docs/acceptance.md)
 
 Only the integration, receivers, tests and documentation in this repository are

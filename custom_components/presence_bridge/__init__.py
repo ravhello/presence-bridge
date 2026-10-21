@@ -12,6 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.helpers.service import async_register_admin_service
 
 from .const import (
     DEFAULT_PAIRING_TIMEOUT,
@@ -103,18 +104,19 @@ def _coordinator(hass: HomeAssistant) -> PresenceBridgeCoordinator:
 
 @callback
 def _async_register_services(hass: HomeAssistant) -> None:
-    async def start_pairing(call: ServiceCall) -> dict[str, Any]:
-        return await _coordinator(hass).async_start_pairing(
+    async def start_pairing(call: ServiceCall) -> dict[str, Any] | None:
+        result = await _coordinator(hass).async_start_pairing(
             call.data["person"],
             call.data.get("observer_id"),
             call.data["timeout_seconds"],
             force_new=call.data["force_new"],
         )
+        return result if call.return_response else None
 
-    async def cancel_pairing(call: ServiceCall) -> dict[str, Any]:
+    async def cancel_pairing(call: ServiceCall) -> dict[str, Any] | None:
         coordinator = _coordinator(hass)
         await coordinator.async_cancel_pairing(publish=True)
-        return coordinator.pairing_payload()
+        return coordinator.pairing_payload() if call.return_response else None
 
     async def set_observer_area(call: ServiceCall) -> None:
         await _coordinator(hass).async_set_observer_area(
@@ -125,26 +127,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def remove_identity(call: ServiceCall) -> None:
         await _coordinator(hass).async_remove_identity(call.data["identity_id"])
 
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "start_pairing",
         start_pairing,
         schema=START_PAIRING_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "cancel_pairing",
         cancel_pairing,
         supports_response=SupportsResponse.OPTIONAL,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "set_observer_area",
         set_observer_area,
         schema=SET_OBSERVER_AREA_SCHEMA,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "remove_identity",
         remove_identity,

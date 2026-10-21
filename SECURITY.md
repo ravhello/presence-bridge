@@ -7,6 +7,12 @@ address, MQTT credential, Home Assistant backup, or active pairing code.
 Supported security fixes target the latest published release. The pairing
 protocol and threat model are documented in [docs/protocol.md](docs/protocol.md).
 
+Version 0.2.2 fixes missing administrator checks on the four HA configuration
+services. Earlier versions restricted the panel and WebSocket commands, but not
+these service calls. Upgrade the integration and restart HA to load the guarded
+service registrations. Keep trusted internal automations private: a script
+exposing these privileged actions is a separate authorization boundary.
+
 Linux 0.2.0 is an experimental trusted-host backend, not a sandbox against a
 malicious host administrator. Its BlueZ bond mount is read-only, but contains
 sensitive keys: mount only the selected adapter and never expose it over a

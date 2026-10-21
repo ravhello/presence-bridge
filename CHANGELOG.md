@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2 - Administrator service security preview (2026-10-21)
+
+- Register all four configuration/pairing services with HA's official
+  `async_register_admin_service`; reject non-admin and unknown user contexts
+  before reading invitations or mutating coordinator state.
+- Preserve admin responses and trusted internal automation calls. Return optional
+  pairing responses only when requested by an authorized caller.
+- Keep `bluetooth` in required dependencies (already present in 0.2.1), with a
+  regression test preventing accidental downgrade to an optional dependency.
+- Add permission tests against the real HA service registry/helper in a separate
+  CI job, alongside lightweight registration-contract tests.
+- Link the pending App Store listing and explicitly retain the HACS draft while
+  public app availability is blocked on Apple review. This security release does
+  not claim public iPhone availability, default-HACS acceptance or new RF testing.
+
 ## 0.2.1 - Saved-bond recovery preview (2026-10-07)
 
 - Add administrator-confirmed, session-bound repair of the exact saved Windows bond.
