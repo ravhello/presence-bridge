@@ -1,6 +1,6 @@
 [project]
 name = "presence-bridge-dev"
-version = "0.2.1"
+version = "0.2.2"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
@@ -18,6 +18,8 @@ ignore = ["E501", "PLR2004"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 "tests/test_linux_receiver.py" = ["ASYNC110"]
+# These tests optionally use HA itself, unavailable in the receiver-only venv.
+"tests/test_service_security.py" = ["PLC0415"]
 "bridge/windows/test_*.py" = ["S101"]
 "bridge/windows/gatt_server.py" = ["PLC0415"]
 "bridge/windows/observer.py" = ["PLC0415"]
