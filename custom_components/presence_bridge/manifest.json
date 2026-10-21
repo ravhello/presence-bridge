@@ -2,6 +2,7 @@
   "domain": "presence_bridge",
   "name": "Presence Bridge",
   "after_dependencies": ["mqtt", "person"],
+  "categories": ["presence_location"],
   "codeowners": ["@ravhello"],
   "config_flow": true,
   "dependencies": ["bluetooth", "http"],

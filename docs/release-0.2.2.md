@@ -21,6 +21,8 @@ when requested.
 The panel and configuration WebSocket commands remain administrator-only.
 Bluetooth remains a required integration dependency, with a regression check;
 it was already required in the 0.2.1 source and release.
+The manifest now declares the Presence & location category, resolving the
+additional catalog-metadata warning from HACS validation.
 
 ## Upgrade
 

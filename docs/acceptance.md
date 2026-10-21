@@ -11,7 +11,7 @@ belong in a public report. Software CI is not a hardware certification.
 
 ## Before Testing
 
-- Install matching 0.2.1 integration/receiver packages and app build 219 or newer.
+- Install matching 0.2.2 integration/receiver packages and app build 219 or newer.
 - Back up the protected configuration; do not disturb another person's phone.
 - Verify the enrollment receiver is online and advertising, not just a passive proxy.
 - Use a new invitation. Keep the app foregrounded and move near the selected radio.
