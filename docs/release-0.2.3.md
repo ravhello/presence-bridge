@@ -1,9 +1,19 @@
 ---
-title: 0.2.3 Public App Store Onboarding Preview
+title: 0.2.3 Public App Store Onboarding
 permalink: /release-0.2.3/
 ---
 
-# 0.2.3 Public App Store Onboarding Preview
+# 0.2.3 Public App Store Onboarding
+
+## Publication Channel Correction
+
+Version 0.2.3 is a full GitHub release and the latest normal-channel release.
+It was initially marked as a prerelease, which left normal HACS users on the
+old 0.1.17 release without the administrator-service security fix. The release
+metadata has been corrected without moving the tag, changing the tested source
+commit or replacing any archive/checksum. Users do not need beta access to get
+the fixes. A full-release channel is not a claim of universal hardware support:
+Linux and untested adapter/iPhone combinations remain experimental.
 
 Presence Pair 1.0.0 (build 220) is Apple-approved. Its Italian
 [App Store listing](https://apps.apple.com/app/id6808059201) was independently
@@ -26,8 +36,8 @@ and passive reception instead of treating an OS bond as sufficient proof.
 
 Default HACS inclusion is still subject to the existing
 [submission](https://github.com/hacs/default/pull/10597); do not assume acceptance.
-Until merged, add the repository as a HACS custom integration, enable
-pre-releases and select v0.2.3, or use the matching release ZIP. Back up HA and
+Until merged, add the repository as a HACS custom integration and select
+v0.2.3 or the latest full release, or use the matching release ZIP. Back up HA and
 receiver configuration and verify SHA256SUMS.txt. The HA ZIP is flat: extract
 directly into custom_components/presence_bridge, then restart HA once.
 
@@ -35,6 +45,11 @@ Existing 0.2.2 receivers use the same protocol. Their packaged 0.2.3 versions
 only align metadata; a working receiver does not need an immediate reinstall
 or fresh pairing for these documentation changes. Never reset a shared radio
 or delete working phone bonds as routine upgrade preparation.
+
+The immutable archives were generated before the channel correction, so some
+bundled onboarding text still mentions prereleases. This is not a runtime
+requirement: the current online instructions supersede that wording. Archive
+contents and SHA-256 hashes are intentionally unchanged.
 
 ## Verification Boundary
 

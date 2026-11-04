@@ -46,10 +46,10 @@ outside the configured receiver is required by the public pairing flow.
   store, never in public entity attributes or support diagnostics. Treat HA
   backups as sensitive and use encryption when exporting them.
 
-## Release gates
+## Hardware Acceptance Gates
 
-Local unit tests cannot certify every radio/driver combination. Before a stable
-release, verify the normal public HA panel and installer on a clean supported
+Local unit tests cannot certify every radio/driver combination. Before claiming
+support for another hardware setup, verify the public HA panel and installer on a clean supported
 Windows machine, then test fresh pairing, a valid saved bond, one-sided stale
 bonds, cancellation, timeout, user decline, HA/MQTT restarts, removal and a
 second phone. Confirm protected GATT ACK, HA persistence and phone receipt for
@@ -83,8 +83,8 @@ attempt; this is not a policy to reset working bonds on every normal QR scan.
 
 Presence Pair 1.0.0 (build 220) is Apple-approved and publicly listed in the
 Italian App Store, verified November 4, 2026. That approval is separate from
-receiver compatibility: the integration remains a preview, Linux remains
-experimental, and the full hardware matrix is not certified. Repeat the
+receiver compatibility: a full GitHub release does not certify additional
+hardware. Linux remains experimental and the full hardware matrix is not certified. Repeat the
 [public-app test](public-app-test.md) on each supported setup; successful unit
 tests or App Store approval cannot replace physical results.
 

@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.2.3 - Public App Store onboarding preview (2026-11-04)
+## 0.2.3 - Public App Store onboarding (2026-11-04)
+
+- Correct the GitHub publication channel to full/latest, not prerelease, so
+  normal HACS users receive the permission/dependency fixes rather than 0.1.17.
+  The tested source tag, release archives and checksums are unchanged.
 
 - Link the Apple-approved Presence Pair 1.0.0 (build 220), verified free in the
   Italian public App Store. Initial enrollment no longer requires TestFlight.
