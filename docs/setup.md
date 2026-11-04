@@ -46,8 +46,10 @@ permission is needed only for scanning a QR. An HA link on the same iPhone
 opens the app directly. The Bluetooth exchange does not need phone Wi-Fi.
 The optional signal monitor and access to HA do need network connectivity.
 
-App availability is separate from this open-source release. TestFlight users
-can pair; public App Store availability depends on Apple review.
+Install [Presence Pair from the App Store](https://apps.apple.com/app/id6808059201).
+The public app is free during testing; no TestFlight invitation or purchase is
+required. Apple approval and the Italian public listing were verified on
+November 4, 2026. This does not certify an untested receiver or installation mode.
 
 ## Extra Coverage
 

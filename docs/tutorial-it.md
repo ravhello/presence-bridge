@@ -48,26 +48,27 @@ con HA avviene via MQTT e non richiede il passthrough USB.
 
 ## 2. Installa l'integrazione gratuita
 
-La versione attuale e la **0.2.2, anteprima pubblica**. Presence Pair e ancora
-su TestFlight, non sull'App Store pubblico: per il primo abbinamento serve
-accedere all'app. L'integrazione si installa da HACS come repository
-personalizzato; non e ancora inclusa nel catalogo predefinito.
+La versione attuale e la **0.2.3, anteprima pubblica**. Per il primo abbinamento
+installa gratuitamente [Presence Pair dall'App Store](https://apps.apple.com/app/id6808059201).
+Non serve un invito TestFlight. L'integrazione si installa da HACS come repository
+personalizzato mentre la richiesta di inclusione nel catalogo e in revisione.
+Linux e la compatibilita hardware estesa restano sperimentali.
 
 1. In HACS apri **Integrazioni**.
 2. Dal menu con i tre puntini scegli **Repository personalizzati**.
 3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
    **Integrazione** e conferma.
-4. Abilita le pre-release per questo repository, seleziona **v0.2.2**, installa
+4. Abilita le pre-release per questo repository, seleziona **v0.2.3**, installa
    **Presence Bridge** e riavvia Home Assistant. HACS normalmente esclude le beta;
    vedi la [documentazione dell'interruttore beta](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
 
-In alternativa, estrai `presence_bridge-0.2.2.zip` dalla release nella cartella
+In alternativa, estrai `presence_bridge-0.2.3.zip` dalla release nella cartella
 `<config HA>/custom_components/presence_bridge/`. Il file `manifest.json` deve
 trovarsi direttamente in quella cartella, non in una sottocartella aggiuntiva.
 Prima di aggiornare crea un backup di HA, poi riavvia e aggiungi l'integrazione
-come sopra. Usa il pacchetto Windows della stessa versione 0.2.2.
+come sopra. Usa il pacchetto Windows della stessa versione 0.2.3.
 
 ## 3. Prepara il ricevitore Windows
 
@@ -92,8 +93,9 @@ ricevitore che sente meglio l'iPhone.
 ## 4. Associa una persona
 
 Apri **Presence Bridge** dalla barra laterale di HA, scegli la persona e il
-ricevitore più vicino, quindi premi **Crea codice**. Apri Presence Pair
-sull'iPhone e inquadra il QR: la versione attuale e gratuita, senza acquisti.
+ricevitore più vicino, quindi premi **Crea codice**. Se usi HA sullo stesso
+iPhone premi **Apri Presence Pair**; se il QR e su un altro schermo, apri lo
+scanner di Presence Pair e inquadralo. La versione attuale e gratuita, senza acquisti.
 L'iPhone diventa temporaneamente visibile al ricevitore selezionato, che si
 connette e accetta automaticamente. Se iOS lo chiede, consenti a Presence Pair
 di usare il Bluetooth o tocca **Abbina**, poi attendi la conferma verde senza
@@ -138,6 +140,8 @@ Per ogni telefono HA crea:
 Porta l'iPhone vicino al ricevitore e controlla che il sensore binario diventi
 attivo e che il sensore stanza mostri l'area assegnata. Se usi più ricevitori,
 assegna a ciascuno la sua area e ripeti la prova spostandoti tra le stanze.
+La [prova finale dell'app pubblica](public-app-test.md) descrive come registrare
+il risultato senza cancellare un'associazione funzionante.
 
 ## 6. Aggiornamenti e rimozione
 

@@ -6,14 +6,13 @@ Free, MIT-licensed Home Assistant integration and Bluetooth receivers for local
 iPhone presence and estimated room detection. No developer cloud or subscription.
 The separate Presence Pair iOS app remains proprietary and is free during testing.
 
-**0.2.2 is a public preview, not a universal hardware certification.** Linux is
-experimental. Presence Pair is required for initial enrollment. Its public
-[App Store listing](https://apps.apple.com/app/id6808059201) is pending Apple's
-approval and may not open yet. As of October 21, 2026, build 220 is waiting for
-review, not publicly downloadable. Do not install expecting to enroll an iPhone
-unless you already have legitimate testing access to the app. The default HACS
-submission remains on hold until the app is public; custom-repository access is
-for existing testers, not a workaround for this requirement.
+**0.2.3 is a public preview, not a universal hardware certification.** Linux is
+experimental. Initial enrollment requires [Presence Pair for iPhone on the
+App Store](https://apps.apple.com/app/id6808059201), available free during testing
+for iOS 17 or newer. Version 1.0.0 (build 220) is Apple-approved and its Italian
+public listing was verified on November 4, 2026. TestFlight access is not required.
+The default HACS submission is still under review; use the custom repository
+until it is accepted. Apple approval does not certify every Bluetooth adapter.
 
 ## Choose The Shortest Setup
 
@@ -40,15 +39,15 @@ permissions, configure passthrough or install drivers.
 
 1. Add `https://github.com/ravhello/presence-bridge` to HACS custom repositories,
    category **Integration**. It is not yet in the default HACS catalog.
-2. Enable pre-releases, install **v0.2.2**, then restart HA once.
+2. Enable pre-releases, install **v0.2.3**, then restart HA once.
 3. Add **Presence Bridge** under Settings > Devices & services.
 4. Choose local Linux enrollment only if the host meets the requirements above.
    Otherwise configure HA's MQTT integration and install a remote receiver.
 5. Open the **Presence Bridge** sidebar panel. It shows missing prerequisites,
    pairing-capable receivers, passive scanners and person associations.
 
-Manual installation: extract `presence_bridge-0.2.2.zip` from
-[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.2) into
+Manual installation: extract `presence_bridge-0.2.3.zip` from
+[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.3) into
 `<config>/custom_components/presence_bridge/`. The archive is flat; do not add
 an extra directory layer. Back up HA before upgrading.
 
@@ -70,6 +69,7 @@ permission fix. No pairing reset or receiver replacement is required.
 
 ## Pair And Use
 
+Install the public app from the App Store before creating an invitation.
 Select an HA person and a nearby enrollment receiver, then create a code.
 On the same iPhone, tap **Open Presence Pair**; on another screen, scan the QR.
 Keep the app open near the receiver and accept the iOS Bluetooth request if shown.
@@ -98,7 +98,8 @@ decision source.
 - [Protocol](docs/protocol.md), [privacy](docs/privacy.md), [security](SECURITY.md)
 - [Report a bug or hardware result](https://github.com/ravhello/presence-bridge/issues/new/choose)
 - [English tutorial](docs/tutorial.md), [Italian tutorial](docs/tutorial-it.md)
-- [Release notes](docs/release-0.2.2.md), [changelog](CHANGELOG.md)
+- [Release notes](docs/release-0.2.3.md), [changelog](CHANGELOG.md)
+- [Final public-app test](docs/public-app-test.md)
 - [Physical acceptance checklist](docs/acceptance.md)
 
 Only the integration, receivers, tests and documentation in this repository are

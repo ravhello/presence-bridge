@@ -10,17 +10,19 @@ and no permanent HA credential on the phone.
 
 [Install from GitHub](https://github.com/ravhello/presence-bridge){: .btn }
 
-## Public preview 0.2.1
+## Public preview 0.2.3
 
 The free integration and Windows/Linux receivers are available in the
-[0.2.1 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.1).
+[0.2.3 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.3).
 Use the HACS custom repository with pre-releases enabled, or install the ZIP
-manually. Read the [release notes]({{ site.baseurl }}/release-0.2.1/)
+manually. Read the [release notes]({{ site.baseurl }}/release-0.2.3/)
 for installation, upgrade and compatibility limits.
 
-The iPhone app is still in TestFlight. This integration publication does not
-make Presence Pair available on the public App Store; new enrollment requires
-access to the app. The final demonstration and wider hardware tests are pending.
+Install [Presence Pair from the App Store](https://apps.apple.com/app/id6808059201)
+for initial enrollment. The app is free during testing and requires iOS 17+;
+TestFlight is not required. Version 1.0.0 (build 220) is Apple-approved and the
+Italian public listing was verified on November 4, 2026. Default HACS inclusion
+is still under review. Linux and the wider hardware test matrix remain experimental.
 
 ## Components
 
@@ -40,8 +42,8 @@ fresh, bounded observations to the user's own MQTT broker.
 
 **Presence Pair for iPhone** performs the one-time encrypted association. The
 current compatibility release is free, with no required purchase or
-subscription. It includes optional, previewable support reports. Availability
-on the public App Store remains subject to Apple review.
+subscription. It includes optional, previewable support reports and is now
+available from the App Store.
 
 **Linux receiver (experimental)** supports headless BlueZ enrollment, in-process
 inside suitably configured HA or remotely over MQTT. [Linux setup](linux.md).
@@ -56,6 +58,7 @@ inside suitably configured HA or remotely over MQTT. [Linux setup](linux.md).
 - [Privacy]({{ site.baseurl }}/privacy/)
 - [Protocol and threat model]({{ site.baseurl }}/protocol/)
 - [Physical acceptance checklist]({{ site.baseurl }}/acceptance/)
+- [Final public-app test]({{ site.baseurl }}/public-app-test/)
 
 Presence Bridge is an independent project and is not affiliated with Nabu Casa,
 Apple, or Microsoft.

@@ -39,6 +39,12 @@ that impersonates such an internal caller.
 
 ## App Availability And HACS
 
+**Update, November 4, 2026:** Presence Pair 1.0.0 (build 220) is now approved
+and publicly listed in the Italian [App Store](https://apps.apple.com/app/id6808059201).
+Use [0.2.3](release-0.2.3.md) for current onboarding and the HACS follow-up.
+The text below records the state at the time of the 0.2.2 release, not the
+current installation requirement.
+
 Presence Pair build 220 was resubmitted to Apple on October 18 and is still
 waiting for review as checked October 21. Its intended public listing is
 https://apps.apple.com/app/id6808059201, which may not be reachable before

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3 - Public App Store onboarding preview (2026-11-04)
+
+- Link the Apple-approved Presence Pair 1.0.0 (build 220), verified free in the
+  Italian public App Store. Initial enrollment no longer requires TestFlight.
+- Update README, documentation site, English/Italian tutorials and app-link
+  instructions; distinguish app publication from default HACS acceptance.
+- Add a repeatable public-app smoke test and retain explicit experimental
+  Linux/hardware limits. No new physical test pass is implied by this release.
+- Retain the 0.2.2 administrator-service fix and required Bluetooth dependency.
+  Only documentation and version metadata change; no BLE protocol change or
+  forced re-enrollment. Keep working bonds when upgrading.
+
 ## 0.2.2 - Administrator service security preview (2026-10-21)
 
 - Register all four configuration/pairing services with HA's official

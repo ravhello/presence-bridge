@@ -11,13 +11,19 @@ belong in a public report. Software CI is not a hardware certification.
 
 ## Before Testing
 
-- Install matching 0.2.2 integration/receiver packages and app build 219 or newer.
+- For the current public test, use the 0.2.3 packages and App Store app 1.0.0
+  (build 220). Record existing live versions rather than silently upgrading a
+  working installation. Version 0.2.3 changes documentation/version metadata,
+  not the 0.2.2 BLE protocol.
 - Back up the protected configuration; do not disturb another person's phone.
 - Verify the enrollment receiver is online and advertising, not just a passive proxy.
 - Use a new invitation. Keep the app foregrounded and move near the selected radio.
 - A valid existing bond may complete without an iOS Pair popup. That is expected.
 
 ## Required Cases
+
+Start with the [public-app smoke test](public-app-test.md). A pass is evidence
+for that recorded setup only, not a pass for every row below.
 
 | Case | Expected result |
 | --- | --- |

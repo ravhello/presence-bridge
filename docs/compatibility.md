@@ -81,10 +81,12 @@ current working pairing when running software-only tests. The private physical
 clean-room harness deliberately removes only the selected phone before a fresh
 attempt; this is not a policy to reset working bonds on every normal QR scan.
 
-Publish a beta with these explicit limits before claiming broader hardware
-support. Stable App Store submission still requires the final tested binary,
-hardware demonstration video and Apple review; none of these are replaced by
-successful unit tests.
+Presence Pair 1.0.0 (build 220) is Apple-approved and publicly listed in the
+Italian App Store, verified November 4, 2026. That approval is separate from
+receiver compatibility: the integration remains a preview, Linux remains
+experimental, and the full hardware matrix is not certified. Repeat the
+[public-app test](public-app-test.md) on each supported setup; successful unit
+tests or App Store approval cannot replace physical results.
 
 References: [HA Bluetooth APIs](https://developers.home-assistant.io/docs/core/bluetooth/api/),
 [Private BLE Device](https://www.home-assistant.io/integrations/private_ble_device/).
