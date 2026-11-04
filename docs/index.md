@@ -10,11 +10,11 @@ and no permanent HA credential on the phone.
 
 [Install from GitHub](https://github.com/ravhello/presence-bridge){: .btn }
 
-## Public preview 0.2.3
+## Release 0.2.3
 
 The free integration and Windows/Linux receivers are available in the
-[0.2.3 pre-release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.3).
-Use the HACS custom repository with pre-releases enabled, or install the ZIP
+[0.2.3 full release](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.3).
+Use the HACS custom repository without enabling pre-releases, or install the ZIP
 manually. Read the [release notes]({{ site.baseurl }}/release-0.2.3/)
 for installation, upgrade and compatibility limits.
 

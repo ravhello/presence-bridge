@@ -6,7 +6,7 @@ Free, MIT-licensed Home Assistant integration and Bluetooth receivers for local
 iPhone presence and estimated room detection. No developer cloud or subscription.
 The separate Presence Pair iOS app remains proprietary and is free during testing.
 
-**0.2.3 is a public preview, not a universal hardware certification.** Linux is
+**0.2.3 is a full release for the normal HACS channel, not a universal hardware certification.** Linux is
 experimental. Initial enrollment requires [Presence Pair for iPhone on the
 App Store](https://apps.apple.com/app/id6808059201), available free during testing
 for iOS 17 or newer. Version 1.0.0 (build 220) is Apple-approved and its Italian
@@ -39,7 +39,8 @@ permissions, configure passthrough or install drivers.
 
 1. Add `https://github.com/ravhello/presence-bridge` to HACS custom repositories,
    category **Integration**. It is not yet in the default HACS catalog.
-2. Enable pre-releases, install **v0.2.3**, then restart HA once.
+2. Install **v0.2.3** or the latest full release, then restart HA once.
+   Enabling pre-releases is not required for this version.
 3. Add **Presence Bridge** under Settings > Devices & services.
 4. Choose local Linux enrollment only if the host meets the requirements above.
    Otherwise configure HA's MQTT integration and install a remote receiver.
@@ -87,7 +88,7 @@ needs access to HA in-process, or to the MQTT broker when remote.
 After enrollment, passive observations update presence, room and device tracker
 entities. Assign fixed receivers to real HA areas. RSSI is in dBm, **not metres**;
 walls, orientation and radio silence limit precision. Missing reception is not
-proof someone left home. Do not use this preview as an alarm, lock or life-safety
+proof someone left home. Do not use Bluetooth presence as an alarm, lock or life-safety
 decision source.
 
 ## Public Collaboration
@@ -99,6 +100,7 @@ decision source.
 - [Report a bug or hardware result](https://github.com/ravhello/presence-bridge/issues/new/choose)
 - [English tutorial](docs/tutorial.md), [Italian tutorial](docs/tutorial-it.md)
 - [Release notes](docs/release-0.2.3.md), [changelog](CHANGELOG.md)
+- [Release-channel verification](docs/releasing.md)
 - [Final public-app test](docs/public-app-test.md)
 - [Physical acceptance checklist](docs/acceptance.md)
 

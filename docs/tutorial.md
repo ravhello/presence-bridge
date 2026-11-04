@@ -26,7 +26,7 @@ Bluetooth USB passthrough into HA.
 
 ## 2. Install the free integration
 
-The current release is the **0.2.3 public preview**. Install the free
+The current version is the **0.2.3 full release**. Install the free
 [Presence Pair app from the App Store](https://apps.apple.com/app/id6808059201)
 for initial enrollment; no TestFlight invitation is required. This repository
 can be installed through HACS as a custom repository while its default catalog
@@ -36,9 +36,8 @@ submission is under review. Linux and broader hardware support remain experiment
 2. From the three-dot menu, select **Custom repositories**.
 3. Enter `https://github.com/ravhello/presence-bridge`, choose
    **Integration**, and confirm.
-4. Enable pre-releases for this repository, select **v0.2.3**, install
-   **Presence Bridge**, and restart Home Assistant. HACS normally excludes betas;
-   see its [pre-release switch documentation](https://www.hacs.xyz/docs/use/entities/switch/).
+4. Select **v0.2.3** or the latest full release, install **Presence Bridge**,
+   and restart Home Assistant. You do not need to enable beta/pre-release versions.
 5. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 

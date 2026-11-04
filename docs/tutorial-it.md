@@ -48,7 +48,7 @@ con HA avviene via MQTT e non richiede il passthrough USB.
 
 ## 2. Installa l'integrazione gratuita
 
-La versione attuale e la **0.2.3, anteprima pubblica**. Per il primo abbinamento
+La versione attuale e la **0.2.3, release ordinaria**. Per il primo abbinamento
 installa gratuitamente [Presence Pair dall'App Store](https://apps.apple.com/app/id6808059201).
 Non serve un invito TestFlight. L'integrazione si installa da HACS come repository
 personalizzato mentre la richiesta di inclusione nel catalogo e in revisione.
@@ -58,9 +58,8 @@ Linux e la compatibilita hardware estesa restano sperimentali.
 2. Dal menu con i tre puntini scegli **Repository personalizzati**.
 3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
    **Integrazione** e conferma.
-4. Abilita le pre-release per questo repository, seleziona **v0.2.3**, installa
-   **Presence Bridge** e riavvia Home Assistant. HACS normalmente esclude le beta;
-   vedi la [documentazione dell'interruttore beta](https://www.hacs.xyz/docs/use/entities/switch/).
+4. Seleziona **v0.2.3** o l'ultima release ordinaria, installa **Presence Bridge**
+   e riavvia Home Assistant. Non serve abilitare beta o pre-release.
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
 
