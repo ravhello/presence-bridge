@@ -1,4 +1,4 @@
-# Live signal (0.1.36 candidate)
+# Live signal
 
 The HA identity snapshot includes `signal_receivers`, one fresh measurement per
 matching receiver, with RSSI in dBm and the advertisement's `sampled_at` timestamp.
@@ -50,11 +50,13 @@ after per-phone/per-receiver calibration at known distances, but walls, body
 shielding and multipath prevent a claim of precise meters. Do not use this RSSI
 view as a safety, lock or alarm authorization signal.
 
-## Release gate
+## Public-app verification
 
 Build 215 was signed, passed four Xcode UI tests and reached TestFlight on
-2026-09-12; installation was verified on 2026-09-13. A physical QR/Keychain/TLS
-and network-loss test of the monitor remains necessary before public release.
+2026-09-12; installation was verified on 2026-09-13. Presence Pair 1.0.0 (build
+220) is now public on the [App Store](https://apps.apple.com/app/id6808059201).
+A physical QR/Keychain/TLS and network-loss test remains necessary to certify
+the monitor on a particular setup; publication does not prove it passed.
 Windows and Swift core tests do not replace it. Bluetooth commissioning is
 unchanged, and unlike the monitor does not require Wi-Fi on the iPhone.
 

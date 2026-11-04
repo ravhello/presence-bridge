@@ -26,25 +26,26 @@ Bluetooth USB passthrough into HA.
 
 ## 2. Install the free integration
 
-The current release is the **0.2.2 public preview**. Presence Pair is still in
-TestFlight, not yet on the public App Store. You need access to that app for
-initial enrollment. This repository can be installed through HACS as a custom
-repository; it is not a default catalog listing.
+The current release is the **0.2.3 public preview**. Install the free
+[Presence Pair app from the App Store](https://apps.apple.com/app/id6808059201)
+for initial enrollment; no TestFlight invitation is required. This repository
+can be installed through HACS as a custom repository while its default catalog
+submission is under review. Linux and broader hardware support remain experimental.
 
 1. In HACS, open **Integrations**.
 2. From the three-dot menu, select **Custom repositories**.
 3. Enter `https://github.com/ravhello/presence-bridge`, choose
    **Integration**, and confirm.
-4. Enable pre-releases for this repository, select **v0.2.2**, install
+4. Enable pre-releases for this repository, select **v0.2.3**, install
    **Presence Bridge**, and restart Home Assistant. HACS normally excludes betas;
    see its [pre-release switch documentation](https://www.hacs.xyz/docs/use/entities/switch/).
 5. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 
-Alternatively, extract the release's `presence_bridge-0.2.2.zip` into
+Alternatively, extract the release's `presence_bridge-0.2.3.zip` into
 `<HA config>/custom_components/presence_bridge/`. Its `manifest.json` must sit
 directly in that folder. Back up HA before updating; then restart and add the
-integration as above. Use the matching 0.2.2 Windows receiver package.
+integration as above. Use the matching 0.2.3 Windows receiver package.
 
 ## 3. Prepare the Windows observer
 
@@ -69,8 +70,9 @@ observer that receives the strongest fresh iPhone signal.
 ## 4. Pair a person
 
 Open **Presence Bridge** in the Home Assistant sidebar, select a person and the
-nearest observer, then choose **Create code**. Open Presence Pair on the iPhone,
-scan the QR code; the current compatibility release needs no purchase. The iPhone then
+nearest observer, then choose **Create code**. On that same iPhone tap
+**Open Presence Pair**; for a QR displayed on another screen, open the app's
+scanner instead. The current compatibility release needs no purchase. The iPhone then
 becomes temporarily visible to the selected receiver, which connects and
 accepts automatically. If iOS asks, allow Presence Pair to use Bluetooth or tap
 Pair, then keep the app open until the green confirmation appears.
@@ -118,6 +120,8 @@ Home Assistant creates three entities for each paired phone:
 Take the iPhone close to the observer and confirm that the presence sensor turns
 on and the room sensor shows the assigned area. With multiple observers, assign
 each one to its area and repeat the check while moving between rooms.
+Use the [final public-app test](public-app-test.md) to record an end-to-end result
+without erasing a working association or confusing BLE silence with absence.
 
 ## 6. Update or remove
 

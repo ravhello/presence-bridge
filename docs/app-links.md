@@ -43,10 +43,11 @@ Official source references:
 An iOS confirmation to open Presence Pair, or a Bluetooth system pairing prompt,
 may still be required. Those are not QR scans and are not bypassed.
 
-The App Store link uses app ID `6808059201`. As checked on 2026-09-16, the Italian
-public catalog does not list it yet. TestFlight remains the installation path
-until Apple approves and releases the app. Installing the app does not resume a
-consumed or expired invitation: return to HA and open a current code.
+The [public App Store link](https://apps.apple.com/app/id6808059201) uses app ID
+`6808059201`. The Italian catalog lists Presence Pair 1.0.0 free for iOS 17+,
+verified on November 4, 2026; TestFlight is no longer required. Installing the
+app does not resume a consumed or expired invitation: return to HA and open a
+current code. Storefront availability outside Italy was not independently verified.
 
 Universal Links are a possible follow-up requiring an associated public domain,
 an AASA file, a new signed app build, and device validation. This patch does not
