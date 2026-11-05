@@ -35,8 +35,11 @@ Diagnostics omit receiver identities. Polls are no-store and rate-limited.
 HTTPS uses normal iOS certificate verification, with an optional exact public
 certificate fingerprint from the trusted admin QR for direct HA private TLS.
 No global certificate bypass or HTTP fallback. Redirects are rejected. Native
-HA HTTP storage supplies the certificate fingerprint on recent HA versions;
-reverse proxies use their normally trusted certificate. Renewing a private
+HA's public `hass.http.ssl_certificate` path supplies the certificate fingerprint;
+Presence Bridge does not read `.storage/http` or the server's private key.
+If the public path is absent, the QR has no custom pin and normal iOS trust
+validation still applies; missing pins never enable a TLS bypass.
+Reverse proxies use their normally trusted certificate. Renewing a private
 certificate may require a new signal QR.
 
 The app polls only while foregrounded, handles unavailable/revoked access and

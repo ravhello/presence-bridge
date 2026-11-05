@@ -2,7 +2,6 @@
 
 import base64
 import io
-import json
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -18,15 +17,15 @@ from .signal_access import matches_access, monitor_origin, new_access
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
-def certificate_fingerprint(config_path: str) -> str | None:
+def certificate_fingerprint(certificate_path: str | None) -> str | None:
     """Public certificate only; no access to the server's private key."""
     try:
-        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
-        path = data["data"]["stable"].get("ssl_certificate")
-        if path:
-            certificate = x509.load_pem_x509_certificate(Path(path).read_bytes())
+        if certificate_path:
+            certificate = x509.load_pem_x509_certificate(
+                Path(certificate_path).read_bytes()
+            )
             return certificate.fingerprint(hashes.SHA256()).hex()
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, TypeError):
         pass
     return None
 
@@ -38,7 +37,8 @@ async def create_monitor(coordinator, identity_id: str, origin: str) -> dict:
     row["monitor_pending"] = access
     await coordinator.store.async_save(coordinator.memory)
     fingerprint = await coordinator.hass.async_add_executor_job(
-        certificate_fingerprint, coordinator.hass.config.path(".storage", "http")
+        certificate_fingerprint,
+        getattr(coordinator.hass.http, "ssl_certificate", None),
     )
     query = {
         "v": 1,

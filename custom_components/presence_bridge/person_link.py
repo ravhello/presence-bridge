@@ -1,36 +1,24 @@
-"""Idempotent, additive linking to HA's stored people without touching auth."""
+"""Read-only Person assignment status from Home Assistant's public states."""
 
 from __future__ import annotations
 
-from homeassistant.components import person
-from homeassistant.exceptions import HomeAssistantError
 
-
-async def async_link_tracker(hass, person_entity_id: str, tracker: str) -> None:
-    state = hass.states.get(person_entity_id)
-    if state is None:
-        raise HomeAssistantError("person_not_ready")
-    if tracker in state.attributes.get("device_trackers", []):
-        return
-    owners = person.persons_with_entity(hass, tracker)
+def person_link_status(hass, person_entity_id: str, tracker: str | None) -> str:
+    """Never change Person data; the owner manages trackers in Settings > People."""
+    selected = hass.states.get(person_entity_id)
+    if selected is None:
+        return "person_not_ready"
+    if not tracker:
+        return "tracker_pending"
+    owners = [
+        state.entity_id
+        for state in hass.states.async_all("person")
+        if tracker in state.attributes.get("device_trackers", [])
+    ]
     if any(owner != person_entity_id for owner in owners):
-        raise HomeAssistantError("tracker_already_owned")
-    if not state.attributes.get("editable"):
-        raise HomeAssistantError("person_managed_in_yaml")
-    # Person exposes creation/user linking, but no selected-person update helper.
-    # Use its validated storage collection, never direct .storage file writes.
-    data = hass.data.get("person")
-    if not isinstance(data, list | tuple) or len(data) < 2:
-        raise HomeAssistantError("person_api_unavailable")
-    collection = data[1]
-    person_id = state.attributes.get("id")
-    current = next(
-        (row for row in collection.async_items() if row["id"] == person_id), None
-    )
-    if current is None:
-        raise HomeAssistantError("person_not_found")
-    trackers = current.get("device_trackers", [])
-    if tracker not in trackers:
-        await collection.async_update_item(
-            person_id, {"device_trackers": [*trackers, tracker]}
-        )
+        return "tracker_already_owned"
+    if person_entity_id in owners:
+        return "linked"
+    if not selected.attributes.get("editable", True):
+        return "person_managed_in_yaml"
+    return "manual_configuration_required"

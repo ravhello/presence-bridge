@@ -48,26 +48,26 @@ con HA avviene via MQTT e non richiede il passthrough USB.
 
 ## 2. Installa l'integrazione gratuita
 
-La versione attuale e la **0.2.3, release ordinaria**. Per il primo abbinamento
+La versione attuale e la **0.2.4, release ordinaria**. Per il primo abbinamento
 installa gratuitamente [Presence Pair dall'App Store](https://apps.apple.com/app/id6808059201).
-Non serve un invito TestFlight. L'integrazione si installa da HACS come repository
-personalizzato mentre la richiesta di inclusione nel catalogo e in revisione.
+Non serve un invito TestFlight. Dal 5 novembre 2026 l'integrazione e inclusa nel
+catalogo HACS predefinito: non serve aggiungere un repository personalizzato.
 Linux e la compatibilita hardware estesa restano sperimentali.
 
-1. In HACS apri **Integrazioni**.
-2. Dal menu con i tre puntini scegli **Repository personalizzati**.
-3. Inserisci `https://github.com/ravhello/presence-bridge`, seleziona il tipo
-   **Integrazione** e conferma.
-4. Seleziona **v0.2.3** o l'ultima release ordinaria, installa **Presence Bridge**
+1. Apri HACS e cerca **Presence Bridge**.
+2. Apri la pagina dell'integrazione: non serve configurare repository aggiuntivi.
+3. Se il nuovo elemento non e ancora comparso, ricarica HACS e riprova; mantieni
+   l'eventuale installazione personalizzata esistente senza crearne una duplicata.
+4. Seleziona **v0.2.4** o l'ultima release ordinaria, installa **Presence Bridge**
    e riavvia Home Assistant. Non serve abilitare beta o pre-release.
 5. Apri **Impostazioni > Dispositivi e servizi > Aggiungi integrazione**, cerca
    **Presence Bridge** e completa la configurazione.
 
-In alternativa, estrai `presence_bridge-0.2.3.zip` dalla release nella cartella
+In alternativa, estrai `presence_bridge-0.2.4.zip` dalla release nella cartella
 `<config HA>/custom_components/presence_bridge/`. Il file `manifest.json` deve
 trovarsi direttamente in quella cartella, non in una sottocartella aggiuntiva.
 Prima di aggiornare crea un backup di HA, poi riavvia e aggiungi l'integrazione
-come sopra. Usa il pacchetto Windows della stessa versione 0.2.3.
+come sopra. Per una nuova installazione usa il pacchetto Windows 0.2.4.
 
 ## 3. Prepara il ricevitore Windows
 
@@ -135,6 +135,17 @@ Per ogni telefono HA crea:
 - un sensore binario di presenza;
 - un sensore con la stanza Bluetooth stimata;
 - un `device_tracker` associabile alla persona.
+
+Per includere il tracker nello stato Persona di HA, apri **Impostazioni >
+Persone**, seleziona la persona corretta e nella selezione dei dispositivi premi
+**Aggiungi entita**. Scegli l'esatto ID del tracker mostrato dalla plancia
+Presence Bridge e salva, lasciando selezionati anche i tracker GPS e Wi-Fi.
+La plancia verifica lo stato al prossimo aggiornamento: non devi riabbinare
+l'iPhone. L'integrazione non modifica piu la collezione interna delle Persone.
+Le associazioni esistenti restano intatte; per le persone definite in YAML
+occorre aggiornare il relativo YAML e ricaricare Persone. Un tracker assegnato
+ad altri viene segnalato, mai spostato automaticamente. Questo passaggio e
+separato dall'abbinamento Bluetooth, che puo gia essere completato correttamente.
 
 Porta l'iPhone vicino al ricevitore e controlla che il sensore binario diventi
 attivo e che il sensore stanza mostri l'area assegnata. Se usi più ricevitori,

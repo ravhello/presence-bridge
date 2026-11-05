@@ -9,6 +9,11 @@ Use the normal HA panel and the public App Store app, not a diagnostic pairing
 harness. This smoke test does not certify every adapter or the full
 [acceptance matrix](acceptance.md). Record the real versions and timestamps.
 
+For the current 0.2.4 test, verify that exact integration version is loaded
+before certifying these changes. The App Store binary remains 1.0.0 (build 220);
+no new phone build is required. Legacy private installations are not proof of
+a 0.2.4 runtime pass and must not be overwritten without a backup/diff review.
+
 ## Operator Preparation
 
 Verify the selected receiver's heartbeat, Bluetooth readiness and MQTT/HA
@@ -46,9 +51,22 @@ QR or interrupted connection is not proof of successful enrollment.
    up to two minutes. The operator checks for a genuinely newer passive BLE
    observation. An unchanged sample is inconclusive, not proof of absence.
 7. Reopen HA and verify that the same person/phone is still associated without
-   a duplicate. Optional live signal uses a separate read-only grant and needs
-   phone network access to HA. Opening HA also needs network access; the BLE
-   pairing exchange itself does not require phone Wi-Fi.
+   a duplicate. If the panel says Not assigned in People, open Settings > People,
+   select the intended person, add the exact tracker shown and save without
+   removing GPS/Wi-Fi trackers. Existing assignments need no change. Reopen the
+   panel and confirm the message is gone; do not re-pair to change this setting.
+8. Enable Live signal in the app for that same identity, using its separate
+   read-only grant. Open it directly from HA on the same iPhone, or scan the
+   monitor QR displayed on another screen. This is not another BLE pairing.
+   Verify the signal's age/timestamp, not just a displayed RSSI number. The phone
+   needs network access to HA (Wi-Fi or an existing secure VPN) for HA and this
+   monitor; the Bluetooth pairing exchange itself does not require phone Wi-Fi.
+9. Temporarily disconnect only the phone's network route to HA while keeping
+   Bluetooth on. The monitor must report the network problem without claiming
+   the phone was unpaired. Restore the route and verify it resumes. Do not
+   publish new ports, disable certificate validation or replace the receiver.
+   A self-signed TLS rejection requires a current admin-generated monitor code
+   with the public-certificate pin; report the exact error rather than bypassing it.
 
 ## Separate Clean-Start Case
 

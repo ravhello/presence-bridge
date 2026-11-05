@@ -26,25 +26,25 @@ Bluetooth USB passthrough into HA.
 
 ## 2. Install the free integration
 
-The current version is the **0.2.3 full release**. Install the free
+The current version is the **0.2.4 full release**. Install the free
 [Presence Pair app from the App Store](https://apps.apple.com/app/id6808059201)
-for initial enrollment; no TestFlight invitation is required. This repository
-can be installed through HACS as a custom repository while its default catalog
-submission is under review. Linux and broader hardware support remain experimental.
+for initial enrollment; no TestFlight invitation is required. Presence Bridge is
+included in the default HACS catalog as of November 5, 2026. Linux and broader
+hardware support remain experimental.
 
-1. In HACS, open **Integrations**.
-2. From the three-dot menu, select **Custom repositories**.
-3. Enter `https://github.com/ravhello/presence-bridge`, choose
-   **Integration**, and confirm.
-4. Select **v0.2.3** or the latest full release, install **Presence Bridge**,
+1. Open HACS and search for **Presence Bridge**.
+2. Open the repository's page. No custom-repository configuration is needed.
+3. If the new catalog entry has not appeared yet, reload HACS and try again;
+   keep any existing custom-repository installation rather than creating duplicates.
+4. Select **v0.2.4** or the latest full release, install **Presence Bridge**,
    and restart Home Assistant. You do not need to enable beta/pre-release versions.
 5. Open **Settings > Devices & services > Add integration**, search for
    **Presence Bridge**, and complete setup.
 
-Alternatively, extract the release's `presence_bridge-0.2.3.zip` into
+Alternatively, extract the release's `presence_bridge-0.2.4.zip` into
 `<HA config>/custom_components/presence_bridge/`. Its `manifest.json` must sit
 directly in that folder. Back up HA before updating; then restart and add the
-integration as above. Use the matching 0.2.3 Windows receiver package.
+integration as above. Use the matching 0.2.4 Windows receiver package for a new installation.
 
 ## 3. Prepare the Windows observer
 
@@ -115,6 +115,17 @@ Home Assistant creates three entities for each paired phone:
 - a presence binary sensor;
 - a sensor containing the estimated Bluetooth room;
 - a device tracker that can be assigned to a Home Assistant person.
+
+To include that tracker in HA's Person state, open **Settings > People**, select
+the intended person, and under **Select the devices that belong to this person**
+choose **Add entity**. Select the exact tracker ID shown in the Presence Bridge
+panel and save, keeping existing GPS/Wi-Fi trackers selected. The panel checks
+the resulting public state on its next refresh; no re-pairing is needed.
+The integration no longer adds trackers through HA's internal person collection.
+Existing assignments are not removed. YAML-managed people must be updated in
+their YAML and reloaded. A tracker assigned to another person is flagged, not
+silently reassigned. Bluetooth enrollment and this aggregate Person setting
+are separate; a pending assignment does not mean pairing failed.
 
 Take the iPhone close to the observer and confirm that the presence sensor turns
 on and the room sensor shows the assigned area. With multiple observers, assign

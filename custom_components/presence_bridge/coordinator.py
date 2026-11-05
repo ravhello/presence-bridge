@@ -61,6 +61,7 @@ from .const import (
 from .local_receiver import LocalReceiver
 from .models import IdentityState, ObserverState
 from .native_bluetooth import refresh_native_observations
+from .person_link import person_link_status
 from .protocol import PairingLink, b64url_encode
 
 _IRK_RE = re.compile(r"^[0-9A-F]{32}$")
@@ -1355,6 +1356,9 @@ class PresenceBridgeCoordinator:
         area = (
             self.area_registry.async_get_area(state.area_id) if state.area_id else None
         )
+        tracker_entity_id = er.async_get(self.hass).async_get_entity_id(
+            "device_tracker", DOMAIN, f"{identity_id}_tracker"
+        )
         return {
             "identity_id": state.identity_id,
             "person_entity_id": state.person_entity_id,
@@ -1370,9 +1374,10 @@ class PresenceBridgeCoordinator:
             "signal_receivers": signal["receivers"],
             "presence_evidence": "detected" if state.is_home else "not_detected",
             "source_integration": DOMAIN,
-            "person_link_status": self.memory.get("identities", {})
-            .get(identity_id, {})
-            .get("person_link_status", "pending"),
+            "tracker_entity_id": tracker_entity_id,
+            "person_link_status": person_link_status(
+                self.hass, state.person_entity_id, tracker_entity_id
+            ),
             "room_fresh": room_fresh,
             "last_known_area": area.name if area else None,
             "receiver_count": len(signal["receivers"]),
@@ -1436,6 +1441,7 @@ class PresenceBridgeCoordinator:
             observer["area_name"] = "REDACTED" if observer["area_name"] else None
         for index, identity in enumerate(payload["identities"], start=1):
             identity.pop("signal_receivers", None)
+            identity.pop("tracker_entity_id", None)
             identity["identity_id"] = f"IDENTITY_{index}"
             identity["person_entity_id"] = "REDACTED"
             identity["label"] = "REDACTED"

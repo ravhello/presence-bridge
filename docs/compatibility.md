@@ -40,8 +40,11 @@ outside the configured receiver is required by the public pairing flow.
   triangulation.
 - Native HA cache intake uses HA's selected source for an address. It does not
   expose simultaneous RSSI from every adapter or claim triangulation.
-- Existing GPS/Wi-Fi trackers are preserved when adding a paired identity to
-  its selected editable HA Person. YAML-defined people must be updated in YAML.
+- Existing GPS/Wi-Fi and BLE tracker assignments are preserved. Presence Bridge
+  reads public Person state but does not update HA's internal person collection.
+  Add the displayed BLE tracker in Settings > People without deselecting other
+  trackers. YAML-defined people must be updated in YAML. The panel reflects
+  changes without re-pairing and flags assignments to another person.
 - Private keys stay in HA's protected configuration and the receiver bond
   store, never in public entity attributes or support diagnostics. Treat HA
   backups as sensitive and use encryption when exporting them.
