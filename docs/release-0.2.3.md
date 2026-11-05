@@ -5,6 +5,10 @@ permalink: /release-0.2.3/
 
 # 0.2.3 Public App Store Onboarding
 
+**Update, November 5, 2026:** HACS submission #10597 is approved and merged.
+Use the current [0.2.4 release guide](release-0.2.4.md) for default-catalog
+installation. The channel correction below records the 0.2.3 publication history.
+
 ## Publication Channel Correction
 
 Version 0.2.3 is a full GitHub release and the latest normal-channel release.

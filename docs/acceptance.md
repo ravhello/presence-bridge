@@ -11,10 +11,10 @@ belong in a public report. Software CI is not a hardware certification.
 
 ## Before Testing
 
-- For the current public test, use the 0.2.3 packages and App Store app 1.0.0
+- For the current public test, use the 0.2.4 packages and App Store app 1.0.0
   (build 220). Record existing live versions rather than silently upgrading a
-  working installation. Version 0.2.3 changes documentation/version metadata,
-  not the 0.2.2 BLE protocol.
+  working installation. Version 0.2.4 changes the HTTP certificate lookup and
+  Person assignment workflow, not the 0.2.2 BLE protocol.
 - Back up the protected configuration; do not disturb another person's phone.
 - Verify the enrollment receiver is online and advertising, not just a passive proxy.
 - Use a new invitation. Keep the app foregrounded and move near the selected radio.
@@ -38,6 +38,8 @@ for that recorded setup only, not a pass for every row below.
 | Explicit remove, then HA restart | Server removal verified; iPhone preparation survives restart |
 | Second phone/person | No reassignment or deletion of the first phone |
 | Passive tracking, screen locked | Fresh timestamps; stale reception never proves absence |
+| Settings > People assignment, removal and other owner | Live panel status; no internal writes, lost GPS/Wi-Fi selection or forced re-pairing |
+| Live signal with native HTTPS / trusted proxy | Correct public-certificate pin when available; no storage lookup or TLS bypass |
 | Two receivers, away and return | Explainable estimates; no precise-distance promise |
 
 For a clean-start test, explicitly remove only the selected phone in HA and wait

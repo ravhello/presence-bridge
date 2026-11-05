@@ -5,6 +5,10 @@ permalink: /setup/
 
 # Choose Your Installation
 
+Install Presence Bridge from the default HACS catalog (accepted November 5, 2026).
+Search its name and choose the latest full release; no custom repository or
+beta switch is needed. Existing custom-repository installations can be kept.
+
 ## Local Linux: Fewest Components, Experimental
 
 Use the integration's **Local Linux receiver** option when Home Assistant can
@@ -66,6 +70,10 @@ removal. Keep it available for identity management.
 Back up HA and receiver configuration before upgrades. Install matching
 integration and receiver versions; refresh browser caches after frontend changes.
 Existing person, Wi-Fi/GPS and room assignments are preserved.
+Starting with 0.2.4, new trackers are added to an aggregate HA Person by the owner
+in Settings > People, not through HA's internal collection. The panel exposes
+the exact tracker ID and checks the current assignment on refresh. A successful
+BLE pairing does not require completing this optional aggregation setting.
 
 Remove a phone through Presence Bridge: the owning receiver must confirm its
 specific OS bond is gone before HA forgets the association. iOS may still

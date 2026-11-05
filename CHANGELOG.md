@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.4 - Supported HTTP API and Owner-Managed People (2026-11-05)
+
+- Publish default HACS catalog onboarding following approval/merge of #10597.
+- Read the public certificate path from hass.http.ssl_certificate, never
+  .storage/http or the server's private key. Keep normal TLS verification when
+  no native certificate pin is available; no trust bypass is introduced.
+- Stop updating the internal Person collection. The owner assigns generated
+  trackers through Settings > People (or YAML). Preserve all existing links.
+- Report live assignment status and the registry's tracker entity ID, including
+  external owner conflicts and YAML-managed people; ignore stale cached success
+  markers and keep tracker IDs out of anonymized diagnostics.
+- Add regression tests for certificates, real HA public state, preserved Person
+  data, live assignment changes and localized panel guidance. No BLE protocol or
+  iPhone binary changes; Linux/hardware limitations still apply.
+
 ## 0.2.3 - Public App Store onboarding (2026-11-04)
 
 - Correct the GitHub publication channel to full/latest, not prerelease, so

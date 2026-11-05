@@ -6,13 +6,14 @@ Free, MIT-licensed Home Assistant integration and Bluetooth receivers for local
 iPhone presence and estimated room detection. No developer cloud or subscription.
 The separate Presence Pair iOS app remains proprietary and is free during testing.
 
-**0.2.3 is a full release for the normal HACS channel, not a universal hardware certification.** Linux is
+**0.2.4 is a full release for the normal HACS channel, not a universal hardware certification.** Linux is
 experimental. Initial enrollment requires [Presence Pair for iPhone on the
 App Store](https://apps.apple.com/app/id6808059201), available free during testing
 for iOS 17 or newer. Version 1.0.0 (build 220) is Apple-approved and its Italian
 public listing was verified on November 4, 2026. TestFlight access is not required.
-The default HACS submission is still under review; use the custom repository
-until it is accepted. Apple approval does not certify every Bluetooth adapter.
+Presence Bridge was accepted into the default HACS catalog on November 5, 2026.
+No custom repository or beta opt-in is required. HACS inclusion and Apple
+approval do not certify every Bluetooth adapter.
 
 ## Choose The Shortest Setup
 
@@ -37,9 +38,10 @@ permissions, configure passthrough or install drivers.
 
 [Open HACS repository](https://my.home-assistant.io/redirect/hacs_repository/?owner=ravhello&repository=presence-bridge&category=integration)
 
-1. Add `https://github.com/ravhello/presence-bridge` to HACS custom repositories,
-   category **Integration**. It is not yet in the default HACS catalog.
-2. Install **v0.2.3** or the latest full release, then restart HA once.
+1. Open HACS, search for **Presence Bridge**, and open its repository page.
+   If the new catalog entry has not reached your instance yet, reload HACS
+   before trying again; do not add a duplicate or remove the integration.
+2. Install **v0.2.4** or the latest full release, then restart HA once.
    Enabling pre-releases is not required for this version.
 3. Add **Presence Bridge** under Settings > Devices & services.
 4. Choose local Linux enrollment only if the host meets the requirements above.
@@ -47,8 +49,8 @@ permissions, configure passthrough or install drivers.
 5. Open the **Presence Bridge** sidebar panel. It shows missing prerequisites,
    pairing-capable receivers, passive scanners and person associations.
 
-Manual installation: extract `presence_bridge-0.2.3.zip` from
-[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.3) into
+Manual installation: extract `presence_bridge-0.2.4.zip` from
+[Releases](https://github.com/ravhello/presence-bridge/releases/tag/v0.2.4) into
 `<config>/custom_components/presence_bridge/`. The archive is flat; do not add
 an extra directory layer. Back up HA before upgrading.
 
@@ -81,6 +83,14 @@ budget. Success requires the QR proof, authenticated Bluetooth bond, protected
 acknowledgement, HA identity verification and saved association. A paired-device
 entry alone is not success.
 
+After pairing, assign the displayed Bluetooth tracker in **Settings > People >
+your person > Select devices > Add entity**, then save. Add it alongside existing
+GPS/Wi-Fi trackers, not instead of them. The panel reports the current assignment
+and links to People; it never writes to HA's internal person collection. Existing
+assignments survive upgrades. For YAML-managed people, add the tracker in YAML
+and reload People. Phone enrollment is complete before this optional aggregate
+Person setting; missing BLE reception must not prove absence.
+
 Wi-Fi is not needed for the Bluetooth exchange. Opening HA or the optional
 live-signal monitor on the iPhone requires network access to HA. The receiver
 needs access to HA in-process, or to the MQTT broker when remote.
@@ -99,7 +109,7 @@ decision source.
 - [Protocol](docs/protocol.md), [privacy](docs/privacy.md), [security](SECURITY.md)
 - [Report a bug or hardware result](https://github.com/ravhello/presence-bridge/issues/new/choose)
 - [English tutorial](docs/tutorial.md), [Italian tutorial](docs/tutorial-it.md)
-- [Release notes](docs/release-0.2.3.md), [changelog](CHANGELOG.md)
+- [Release notes](docs/release-0.2.4.md), [changelog](CHANGELOG.md)
 - [Release-channel verification](docs/releasing.md)
 - [Final public-app test](docs/public-app-test.md)
 - [Physical acceptance checklist](docs/acceptance.md)

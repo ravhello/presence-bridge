@@ -151,3 +151,31 @@ test("verified server removal requires phone guidance, ordinary failure does not
   assert.notEqual(p.pairingGuidance({state: "preparing"})?.title, p.pairingGuidance(pairing).title);
   assert.notEqual(p.pairingGuidance({...pairing, state: "complete"})?.title, p.pairingGuidance(pairing).title);
 });
+
+test("Person assignment is actionable, localized and escaped without a mutation action", () => {
+  const p = panel("it");
+  const item = { person_link_status: "manual_configuration_required", tracker_entity_id: 'device_tracker.phone<"unsafe' };
+  const html = p.personLinkView(item);
+  assert.match(html, /Non assegnato in Persone/);
+  assert.match(html, /href="\/config\/person"/);
+  assert.match(html, /mdi:account-cog-outline/);
+  assert.match(html, /device_tracker.phone&lt;&quot;unsafe/);
+  assert.doesNotMatch(html, /data-action|<button|device_tracker.phone<"/);
+  assert.equal(p.personLinkView({ ...item, person_link_status: "linked" }), "");
+  assert.match(p.personLinkView({ ...item, person_link_status: "tracker_already_owned" }), /un'altra persona/);
+  assert.match(p.personLinkView({ ...item, person_link_status: "person_managed_in_yaml" }), /gestita in YAML/);
+});
+
+test("Person assignment change is reflected by polling without deleting the phone", () => {
+  const p = panel();
+  p._data = { ...data([windows]), identities: [{ identity_id: "phone", label: "Test phone", person_link_status: "manual_configuration_required", tracker_entity_id: "device_tracker.ble" }] };
+  p.render();
+  assert.match(p.shadowRoot.innerHTML, /Not assigned in People/);
+  p._data.identities[0].person_link_status = "linked";
+  p.render();
+  assert.doesNotMatch(p.shadowRoot.innerHTML, /Not assigned in People/);
+  assert.match(p.shadowRoot.innerHTML, /Test phone/);
+  p._data.identities[0].person_link_status = "manual_configuration_required";
+  p.render();
+  assert.match(p.shadowRoot.innerHTML, /Not assigned in People/);
+});

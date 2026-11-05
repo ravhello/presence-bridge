@@ -1,12 +1,15 @@
 """Exercise real coordinator methods with clocks and receivers under control."""
 
 import ast
+import copy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+
+from test_person_link import person_link_status
 
 ROOT = Path(__file__).parents[1] / "custom_components/presence_bridge"
 
@@ -56,6 +59,12 @@ def make_coordinator():
             "_observer_id_from_topic": lambda topic: "dell",
             "async_dispatcher_send": Mock(),
             "SIGNAL_STATE_UPDATED": "updated",
+            "person_link_status": person_link_status,
+            "er": SimpleNamespace(
+                async_get=lambda _: SimpleNamespace(
+                    async_get_entity_id=lambda *_: "device_tracker.test_ble"
+                )
+            ),
         }
     )
     exec(compile(ast.Module(body=[cls], type_ignores=[]), "coordinator", "exec"), ns)
@@ -69,7 +78,13 @@ def make_coordinator():
     c.area_registry = SimpleNamespace(
         async_get_area=lambda _: SimpleNamespace(name="Room")
     )
-    c.hass = object()
+    person = SimpleNamespace(
+        entity_id="person.test",
+        attributes={"editable": True, "device_trackers": []},
+    )
+    c.hass = SimpleNamespace(
+        states=SimpleNamespace(get=lambda _: person, async_all=lambda _: [person])
+    )
     c._decode_payload = lambda msg: msg.payload
     c._ensure_observer = lambda oid, payload: c.observers[oid]
     return c, ns, now
@@ -86,6 +101,26 @@ def add_observer(c, ns, now, oid="dell", age=0, rssi=-60):
     ]
     c.observers[oid] = o
     return o
+
+
+def test_identity_payload_uses_live_assignment_not_persisted_success():
+    c, ns, _ = make_coordinator()
+    c.memory["identities"]["phone"].update(
+        person_link_status="linked", person_link_completed=True
+    )
+    before = copy.deepcopy(c.memory)
+    payload = c.identity_payload("phone")
+    assert payload["tracker_entity_id"] == "device_tracker.test_ble"
+    assert payload["person_link_status"] == "manual_configuration_required"
+    c.hass.states.get("person.test").attributes["device_trackers"].append(
+        "device_tracker.test_ble"
+    )
+    assert c.identity_payload("phone")["person_link_status"] == "linked"
+    ns["er"].async_get = Mock(
+        return_value=SimpleNamespace(async_get_entity_id=lambda *_: None)
+    )
+    assert c.identity_payload("phone")["person_link_status"] == "tracker_pending"
+    assert c.memory == before
 
 
 def test_replayed_observation_does_not_refresh_last_seen():

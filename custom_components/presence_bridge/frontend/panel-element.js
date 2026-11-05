@@ -72,6 +72,20 @@ class PresenceBridgePanel extends HTMLElement {
       .replaceAll('"', "&quot;");
   }
 
+  personLinkView(item) {
+    if (item.person_link_status === "linked") return "";
+    const messages = {
+      manual_configuration_required: this.text("Not assigned in People", "Non assegnato in Persone"),
+      person_managed_in_yaml: this.text("Person managed in YAML", "Persona gestita in YAML"),
+      tracker_already_owned: this.text("Tracker assigned to another person", "Tracker assegnato a un'altra persona"),
+      person_not_ready: this.text("Selected person unavailable", "Persona selezionata non disponibile"),
+      tracker_pending: this.text("Tracker entity not ready", "Entita tracker non pronta"),
+    };
+    const label = messages[item.person_link_status] || this.text("Person assignment not verified", "Assegnazione persona non verificata");
+    const tracker = item.tracker_entity_id ? `<code>${this.escape(item.tracker_entity_id)}</code>` : "";
+    return `<div class="person-link"><span>${label}</span>${tracker}<a href="/config/person"><ha-icon icon="mdi:account-cog-outline"></ha-icon>${this.text("Settings > People", "Impostazioni > Persone")}</a></div>`;
+  }
+
   render() {
     if (!this.shadowRoot) return;
     // Background status polling must not close a native selection menu.
@@ -132,6 +146,10 @@ class PresenceBridgePanel extends HTMLElement {
         .lease span { display:block; }
         .lease .countdown { margin-top:3px; color:var(--secondary-text-color); font-size:13px; font-variant-numeric:tabular-nums; }
         .diagnostic { font:12px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--secondary-text-color); }
+        .person-link { display:grid; gap:6px; margin-top:6px; font-size:13px; overflow-wrap:anywhere; }
+        .person-link code { font-size:12px; white-space:normal; }
+        .person-link a { display:inline-flex; align-items:center; gap:6px; min-height:36px; color:var(--primary-color); }
+        .person-link ha-icon { --mdc-icon-size:18px; flex:0 0 18px; }
         .actions { display:flex; flex-wrap:wrap; gap:8px; }
         a.action { padding:10px 16px; overflow-wrap:anywhere; text-align:center; }
         a.store-link { color:var(--primary-color); }
@@ -169,7 +187,7 @@ class PresenceBridgePanel extends HTMLElement {
         </section>
         <section>
           <h2>${this.text("Paired identities", "Identità associate")}</h2>
-          ${data.identities.length ? `<table><thead><tr><th>${this.text("Person", "Persona")}</th><th>${this.text("Status", "Stato")}</th><th>${this.text("Room", "Stanza")}</th><th>RSSI</th><th></th></tr></thead><tbody>${data.identities.map((item) => `<tr><td>${this.escape(item.label)}${item.person_link_status && item.person_link_status !== "linked" ? `<div class="diagnostic">${this.escape(item.person_link_status)}</div>` : ""}</td><td><span class="dot ${item.is_home ? "on" : ""}"></span>${item.is_home ? this.text("Detected", "Rilevato") : this.text("Not detected", "Non rilevato")}</td><td>${this.escape(item.room_fresh ? (item.area_name || item.observer_name || "—") : "—")}</td><td>${item.rssi ?? "—"}</td><td><button class="icon" data-action="remove" data-identity="${this.escape(item.identity_id)}" title="${this.text("Remove identity", "Rimuovi identità")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></td></tr>`).join("")}</tbody></table>` : `<span class="muted">${this.text("No paired iPhone", "Nessun iPhone associato")}</span>`}
+          ${data.identities.length ? `<table><thead><tr><th>${this.text("Person", "Persona")}</th><th>${this.text("Status", "Stato")}</th><th>${this.text("Room", "Stanza")}</th><th>RSSI</th><th></th></tr></thead><tbody>${data.identities.map((item) => `<tr><td>${this.escape(item.label)}${this.personLinkView(item)}</td><td><span class="dot ${item.is_home ? "on" : ""}"></span>${item.is_home ? this.text("Detected", "Rilevato") : this.text("Not detected", "Non rilevato")}</td><td>${this.escape(item.room_fresh ? (item.area_name || item.observer_name || "—") : "—")}</td><td>${item.rssi ?? "—"}</td><td><button class="icon" data-action="remove" data-identity="${this.escape(item.identity_id)}" title="${this.text("Remove identity", "Rimuovi identità")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></td></tr>`).join("")}</tbody></table>` : `<span class="muted">${this.text("No paired iPhone", "Nessun iPhone associato")}</span>`}
         </section>
         <section><h2>${this.text("Live signal in the app", "Segnale live nell'app")}</h2><div class="actions">${data.identities.map(item => `<button class="secondary" data-action="monitor" data-identity="${this.escape(item.identity_id)}"><ha-icon icon="mdi:cellphone-wireless"></ha-icon>${this.escape(item.label)}</button><button class="icon" data-action="revoke-monitor" data-identity="${this.escape(item.identity_id)}" title="${this.text("Revoke signal access", "Revoca accesso al segnale")}"><ha-icon icon="mdi:shield-off-outline"></ha-icon></button>`).join("")}</div>
         ${this._monitor ? `<p>${isAppleMobile() ? this.text("Open Presence Pair on this device. Read-only signal access, no new Bluetooth pairing.", "Apri Presence Pair su questo dispositivo. Accesso al segnale in sola lettura, nessun nuovo abbinamento Bluetooth.") : this.text("Scan with Presence Pair supporting Live signal. Read-only access for this phone, no new Bluetooth pairing. Single-use code, valid for 10 minutes.", "Scansiona con Presence Pair che supporta Segnale live. Sola lettura per questo telefono, nessun nuovo abbinamento Bluetooth. Codice monouso valido 10 minuti.")}</p><div class="qr" style="max-width:320px"><img alt="Signal access QR" src="${this.escape(this._monitor.qr_data_uri)}"></div><div class="actions">${this.appLinks(this._monitor.uri)}<button class="secondary" data-action="close-monitor">${this.text("Close", "Chiudi")}</button></div>` : ""}</section>
