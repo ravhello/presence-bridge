@@ -2,6 +2,8 @@
 
 [![Validate](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml/badge.svg)](https://github.com/ravhello/presence-bridge/actions/workflows/validate.yml)
 
+**[Start here](https://ravhello.github.io/presence-bridge/) | [Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=ravhello&repository=presence-bridge&category=integration) | [iPhone app](https://apps.apple.com/app/id6808059201) | [Italiano](https://ravhello.github.io/presence-bridge/tutorial-it/) | [Questions](https://github.com/ravhello/presence-bridge/discussions)**
+
 Free, MIT-licensed Home Assistant integration and Bluetooth receivers for local
 iPhone presence and estimated room detection. No developer cloud or subscription.
 The separate Presence Pair iOS app remains proprietary and is free during testing.
@@ -16,6 +18,14 @@ No custom repository or beta opt-in is required. HACS inclusion and Apple
 approval do not certify every Bluetooth adapter.
 
 ## Choose The Shortest Setup
+
+Presence Pair handles initial iPhone Bluetooth enrollment without asking the
+owner to extract an identity key manually. Presence Bridge then resolves the
+phone's rotating private Bluetooth addresses locally. Use its observations as
+one input to comfort automations, alongside your existing presence sensors.
+
+For an overview before installing, read the [FAQ](docs/faq.md). To introduce
+the project to your community, use the [share kit](docs/share.md).
 
 | Installation | Enrollment receiver | MQTT |
 | --- | --- | --- |
