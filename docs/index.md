@@ -1,5 +1,6 @@
 ---
-title: Presence Bridge
+title: Presence Bridge - iPhone Bluetooth presence for Home Assistant
+description: Local iPhone presence, room estimates and live Bluetooth signal in Home Assistant. Free MIT integration in HACS, with Windows and experimental Linux receivers.
 permalink: /
 ---
 
@@ -8,7 +9,28 @@ permalink: /
 Local room-level iPhone presence for Home Assistant, with no developer cloud
 and no permanent HA credential on the phone.
 
-[Install from GitHub](https://github.com/ravhello/presence-bridge){: .btn }
+[Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=ravhello&repository=presence-bridge&category=integration)
+| [Get the iPhone app](https://apps.apple.com/app/id6808059201)
+| [English setup](tutorial.md) | [Guida italiana](tutorial-it.md)
+
+## What it helps with
+
+Enroll an iPhone without manually extracting its Bluetooth identity key, then
+use local observations as one signal for presence and estimated rooms. Combine
+these entities with motion sensors, GPS/Wi-Fi and your existing HA logic for
+comfort automations. You decide what the observations control.
+
+The **integration and receivers are free and MIT-licensed**. The separate iOS
+app is proprietary and **currently free during compatibility testing**; it may
+become paid in the future. There is no developer cloud or subscription.
+
+<img src="{{ site.baseurl }}/assets/presence-pair-home.jpg" alt="Presence Pair iPhone start screen with the Scan code button" width="230" height="500" style="max-width:100%;height:auto;" />
+
+*Presence Pair app start screen. Initial enrollment needs a compatible receiver;
+a passive Bluetooth proxy alone is not enough. RSSI provides room estimates,
+not exact distances. Linux support is experimental.*
+
+[Check requirements first](setup.md) | [Frequently asked questions](faq.md)
 
 ## Release 0.2.4
 
@@ -64,6 +86,8 @@ inside suitably configured HA or remotely over MQTT. [Linux setup](linux.md).
 - [Protocol and threat model]({{ site.baseurl }}/protocol/)
 - [Physical acceptance checklist]({{ site.baseurl }}/acceptance/)
 - [Final public-app test]({{ site.baseurl }}/public-app-test/)
+- [Ask the community](https://github.com/ravhello/presence-bridge/discussions)
+- [Introduce the project to others]({{ site.baseurl }}/share/)
 
 Presence Bridge is an independent project and is not affiliated with Nabu Casa,
 Apple, or Microsoft.
